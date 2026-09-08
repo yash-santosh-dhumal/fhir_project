@@ -1,0 +1,6 @@
+LOINC_NUM,core_analyte,LONG_COMMON_NAME,SYSTEM,PROPERTY,SCALE_TYP,COMMON_TEST_RANK,synonyms
+718-7,Hemoglobin,Hemoglobin [Mass/volume] in Blood,Bld,MCnc,Qn,1,"['Hgb', 'Hb']"
+6690-2,White Blood Cells,Leukocytes [#/volume] in Blood,Bld,NCnc,Qn,2,"['WBC', 'Leukocytes']"
+777-3,Platelets,Platelets [#/volume] in Blood,Bld,NCnc,Qn,3,"['Plt']"
+1558-6,Glucose,Glucose [Mass/volume] in Serum or Plasma,Ser/Plas,MCnc,Qn,4,"['Fasting Glucose', 'Glucose Fasting']"
+2160-0,Creatinine,Creatinine [Mass/volume] in Serum or Plasma,Ser/Plas,MCnc,Qn,5,"['Creat', 'Cr']"

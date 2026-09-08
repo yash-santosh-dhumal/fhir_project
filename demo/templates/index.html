@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Medical Data Toolkit Demo</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Google Health Medical Data Toolkit</p>
+          <h1>Medical Data Toolkit Demo</h1>
+          <p class="subtitle">Convert an unstructured laboratory report into structured ABDM FHIR R4 data.</p>
+        </div>
+        <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
+      </header>
+
+      <section class="flow" aria-label="Toolkit flow">
+        <span>PDF / Image</span>
+        <span>AI Document Understanding</span>
+        <span>Medical Data Extraction</span>
+        <span>LOINC Mapping</span>
+        <span>FHIR Bundle</span>
+      </section>
+
+      <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
+
+      <section class="grid">
+        <article class="card upload-card" id="dropZone">
+          <h2>Upload Laboratory Report</h2>
+          <p class="muted">Supported formats: PDF, JPEG, PNG</p>
+          <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png" hidden>
+          <button id="browseButton" class="primary" type="button">Browse File</button>
+          <div id="fileInfo" class="file-info">No file selected</div>
+          <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
+        </article>
+
+        <article class="card">
+          <h2>Processing Status</h2>
+          <ol id="stageList" class="stages">
+            <li>Uploading document</li>
+            <li>Processing medical document</li>
+            <li>Extracting structured laboratory data</li>
+            <li>Mapping medical terminology</li>
+            <li>Generating FHIR Bundle</li>
+          </ol>
+          <p id="duration" class="muted">API processing duration: Not available</p>
+        </article>
+      </section>
+
+      <section id="errorBox" class="error" hidden></section>
+
+      <!-- FHIR Resource Visualization (Human Readable) -->
+      <section id="fhirVizSection" class="fhir-viz-section" hidden>
+        <div class="fhir-viz-header">
+          <h2>Human Readable FHIR Visualization</h2>
+          <p class="muted">Each FHIR R4 resource from the Document Bundle, rendered with FHIR terminology.</p>
+        </div>
+
+        <!-- Bundle overview bar -->
+        <div id="bundleOverview" class="bundle-overview"></div>
+
+        <!-- Resource cards grid -->
+        <div id="fhirResourceCards" class="fhir-resource-grid"></div>
+      </section>
+
+      <!-- Quick summary row -->
+      <section class="grid" id="summaryGrid">
+        <article class="card">
+          <h2>FHIR Resource Summary</h2>
+          <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
+          <h3>FHIR Profiles</h3>
+          <ul id="profileList" class="profiles"><li>Not available</li></ul>
+        </article>
+
+        <article class="card">
+          <h2>Extracted Clinical Data</h2>
+          <div class="patient">
+            <div><strong>Patient</strong><span id="patientName">Not available</span></div>
+            <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
+            <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Test</th>
+                  <th>LOINC</th>
+                  <th>Result</th>
+                  <th>Unit</th>
+                  <th>Reference Range</th>
+                </tr>
+              </thead>
+              <tbody id="observationsBody">
+                <tr><td colspan="5">No observations loaded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="card raw-card">
+        <div class="raw-header">
+          <h2>FHIR Format (Raw JSON)</h2>
+          <button id="copyButton" class="secondary small" type="button" disabled>Copy JSON</button>
+        </div>
+        <pre><code id="rawJson" class="language-json">{}</code></pre>
+      </section>
+    </main>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

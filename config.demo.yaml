@@ -1,0 +1,33 @@
+# Local Windows demo configuration for running without Docker.
+#
+# This mirrors src/config.yaml but points LOINC KB paths at the repository's
+# local demo data folder instead of Docker's /data mount.
+
+logging_level: "INFO"
+
+classifier_llm_client:
+  type: "GeminiClient"
+  parameters:
+    model: "gemini-3.1-flash-lite"
+    api_key_env: "GEMINI_API_KEY"
+
+extractor_llm_client:
+  type: "GeminiClient"
+  parameters:
+    model: "gemini-3.1-flash-lite"
+    api_key_env: "GEMINI_API_KEY"
+
+max_pdf_pages: 40
+
+supported_types:
+  - "LABORATORY_REPORT"
+
+document_standardization_policy: ACCEPT_ALL
+
+ATTACH_DOCUMENT_TO_BUNDLE: false
+
+RETURN_METADATA: false
+
+loinc_analaytes_index_csv_path: "data/analyte_records_top_2000.csv"
+loinc_system_kb_csv_path: "data/loinc_axis_system_kb_top_2000.csv"
+loinc_property_kb_csv_path: "data/loinc_axis_property_kb_top_2000.csv"

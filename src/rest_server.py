@@ -22,18 +22,43 @@ import os
 import sys
 import threading
 import time
+import types
 from typing import Any, Optional
 
 from absl import app as absl_app
 from absl import flags
 from absl import logging
-import gunicorn.app.base
 import PIL.Image
 import pydantic
 import pypdfium2
 import yaml
 
 import flask
+
+try:
+  import gunicorn.app.base
+except ModuleNotFoundError:
+
+  class _UnsupportedGunicornBaseApplication:
+    """Fallback for Windows dev imports where gunicorn imports Linux fcntl."""
+
+    def __init__(self, *args, **kwargs):
+      del args, kwargs
+
+    def run(self):
+      raise RuntimeError(
+          'Gunicorn is not available in this environment. Use '
+          'scripts/run_toolkit_dev_server.py for local Windows demos.'
+      )
+
+  gunicorn = types.SimpleNamespace(
+      app=types.SimpleNamespace(
+          base=types.SimpleNamespace(
+              BaseApplication=_UnsupportedGunicornBaseApplication
+          )
+      )
+  )
+
 from src.document_to_fhir.common import model_client
 from src.document_to_fhir.common.schema import document_types
 from src.document_to_fhir.common.schema import resources
@@ -582,8 +607,10 @@ def main(unused_argv: Sequence[str]):
 
 # os.register_at_fork must be called before Gunicorn forks child processes.
 # This is required to re-initialize module-level state (e.g. threading locks)
-# in each child process via _init_fork_module_state.
-os.register_at_fork(after_in_child=_init_fork_module_state)
+# in each child process via _init_fork_module_state. Windows does not provide
+# register_at_fork because it does not use POSIX fork semantics.
+if hasattr(os, 'register_at_fork'):
+  os.register_at_fork(after_in_child=_init_fork_module_state)
 
 if __name__ == '__main__':
   absl_app.run(main)

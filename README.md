@@ -1,3 +1,22 @@
+<!-- 
+
+cd "C:\FHIR toolkit"
+.\.venv-toolkit\Scripts\Activate.ps1
+python scripts\run_toolkit_dev_server.py
+
+
+
+cd "C:\FHIR toolkit"
+.\.venv-demo\Scripts\Activate.ps1
+python demo\app.py
+
+
+ -->
+
+
+
+
+
 # Medical Data Toolkit
 
 Medical Data Toolkit converts unstructured medical documents (PDFs, images,
