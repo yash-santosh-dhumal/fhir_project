@@ -34,8 +34,8 @@ from src.document_to_fhir.core.orchestrator import medical_document_standardizer
 token_usage_var = model_client.token_usage_var
 
 
-# Standard DPI for PDF to Image conversion
-TARGET_PDF_TO_IMAGE_DPI = 300
+# Standard DPI for PDF to Image conversion (200 DPI provides crisp OCR while optimizing payload & latency)
+TARGET_PDF_TO_IMAGE_DPI = 200
 _MS_PER_SECOND = 1000
 
 

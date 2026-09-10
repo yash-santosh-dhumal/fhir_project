@@ -42,7 +42,7 @@ def read_prompt(prompt_path: str) -> str:
 
 
 # Standard DPI for PDF to Image conversion
-TARGET_PDF_TO_IMAGE_DPI = 300
+TARGET_PDF_TO_IMAGE_DPI = 200
 
 # A large chunk size to process the entire document at once.
 LARGE_CHUNK_SIZE = 999999

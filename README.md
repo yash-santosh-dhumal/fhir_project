@@ -5,11 +5,9 @@ cd "C:\FHIR toolkit"
 python scripts\run_toolkit_dev_server.py
 
 
-
 cd "C:\FHIR toolkit"
-.\.venv-demo\Scripts\Activate.ps1
+.\.venv-toolkit\Scripts\Activate.ps1
 python demo\app.py
-
 
  -->
 

@@ -3,19 +3,23 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Medical Data Toolkit Demo</title>
+    <title>Medical Data Toolkit — FHIR Dashboard</title>
+    <meta name="description" content="Production-ready FHIR R4 medical data extraction and visualization dashboard for hospital MIS data.">
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=2">
   </head>
   <body>
     <main class="page">
       <header class="hero">
         <div>
           <p class="eyebrow">Google Health Medical Data Toolkit</p>
-          <h1>Medical Data Toolkit Demo</h1>
-          <p class="subtitle">Convert an unstructured laboratory report into structured ABDM FHIR R4 data.</p>
+          <h1>FHIR Dashboard</h1>
+          <p class="subtitle">Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.</p>
         </div>
-        <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
+        <div class="hero-right">
+          <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
+          <div id="dbStats" class="db-stats"></div>
+        </div>
       </header>
 
       <section class="flow" aria-label="Toolkit flow">
@@ -28,90 +32,203 @@
 
       <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
 
-      <section class="grid">
-        <article class="card upload-card" id="dropZone">
-          <h2>Upload Laboratory Report</h2>
-          <p class="muted">Supported formats: PDF, JPEG, PNG</p>
-          <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png" hidden>
-          <button id="browseButton" class="primary" type="button">Browse File</button>
-          <div id="fileInfo" class="file-info">No file selected</div>
-          <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
-        </article>
+      <!-- Tab navigation -->
+      <nav class="tab-nav" id="tabNav">
+        <button class="tab-btn active" data-tab="upload">Upload &amp; Convert</button>
+        <button class="tab-btn" data-tab="batch">Batch Processing</button>
+        <button class="tab-btn" data-tab="patients">Patient Records</button>
+        <button class="tab-btn" data-tab="explorer">FHIR Explorer</button>
+      </nav>
 
-        <article class="card">
-          <h2>Processing Status</h2>
-          <ol id="stageList" class="stages">
-            <li>Uploading document</li>
-            <li>Processing medical document</li>
-            <li>Extracting structured laboratory data</li>
-            <li>Mapping medical terminology</li>
-            <li>Generating FHIR Bundle</li>
-          </ol>
-          <p id="duration" class="muted">API processing duration: Not available</p>
-        </article>
-      </section>
+      <!-- ═══ TAB: Upload & Convert ═══ -->
+      <div class="tab-panel active" id="tab-upload">
+        <section class="upload-section">
+          <article class="card upload-card" id="dropZone">
+            <h2>Upload Laboratory Report</h2>
+            <p class="muted">Supported formats: PDF, JPEG, PNG</p>
+            <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png" hidden>
+            <div class="upload-btn-group">
+              <button id="browseButton" class="primary" type="button">Browse File</button>
+              <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
+            </div>
+            <div id="fileInfo" class="file-info">No file selected</div>
+          </article>
+        </section>
 
-      <section id="errorBox" class="error" hidden></section>
-
-      <!-- FHIR Resource Visualization (Human Readable) -->
-      <section id="fhirVizSection" class="fhir-viz-section" hidden>
-        <div class="fhir-viz-header">
-          <h2>Human Readable FHIR Visualization</h2>
-          <p class="muted">Each FHIR R4 resource from the Document Bundle, rendered with FHIR terminology.</p>
-        </div>
-
-        <!-- Bundle overview bar -->
-        <div id="bundleOverview" class="bundle-overview"></div>
-
-        <!-- Resource cards grid -->
-        <div id="fhirResourceCards" class="fhir-resource-grid"></div>
-      </section>
-
-      <!-- Quick summary row -->
-      <section class="grid" id="summaryGrid">
-        <article class="card">
-          <h2>FHIR Resource Summary</h2>
-          <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
-          <h3>FHIR Profiles</h3>
-          <ul id="profileList" class="profiles"><li>Not available</li></ul>
-        </article>
-
-        <article class="card">
-          <h2>Extracted Clinical Data</h2>
-          <div class="patient">
-            <div><strong>Patient</strong><span id="patientName">Not available</span></div>
-            <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
-            <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
+        <!-- Horizontal Processing Status with Connected Line -->
+        <article class="card stepper-card">
+          <div class="stepper-header">
+            <div>
+              <h2>Processing Pipeline Status</h2>
+              <p class="muted">Live progress tracker across document understanding and FHIR conversion</p>
+            </div>
+            <p id="duration" class="duration-badge">API processing duration: Not available</p>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Test</th>
-                  <th>LOINC</th>
-                  <th>Result</th>
-                  <th>Unit</th>
-                  <th>Reference Range</th>
-                </tr>
-              </thead>
-              <tbody id="observationsBody">
-                <tr><td colspan="5">No observations loaded.</td></tr>
-              </tbody>
-            </table>
+
+          <div class="stepper-wrap">
+            <div class="stepper-track-bg"></div>
+            <div class="stepper-track-fill" id="stepperTrackFill"></div>
+
+            <div class="stepper-steps" id="stageList">
+              <div class="step-item" data-step="0">
+                <div class="step-circle"><span class="step-icon">1</span></div>
+                <div class="step-text">
+                  <span class="step-title">Uploading</span>
+                  <span class="step-desc">Document transfer</span>
+                </div>
+              </div>
+              <div class="step-item" data-step="1">
+                <div class="step-circle"><span class="step-icon">2</span></div>
+                <div class="step-text">
+                  <span class="step-title">Understanding</span>
+                  <span class="step-desc">Document processing</span>
+                </div>
+              </div>
+              <div class="step-item" data-step="2">
+                <div class="step-circle"><span class="step-icon">3</span></div>
+                <div class="step-text">
+                  <span class="step-title">Extraction</span>
+                  <span class="step-desc">Laboratory data</span>
+                </div>
+              </div>
+              <div class="step-item" data-step="3">
+                <div class="step-circle"><span class="step-icon">4</span></div>
+                <div class="step-text">
+                  <span class="step-title">Terminology</span>
+                  <span class="step-desc">LOINC mapping</span>
+                </div>
+              </div>
+              <div class="step-item" data-step="4">
+                <div class="step-circle"><span class="step-icon">5</span></div>
+                <div class="step-text">
+                  <span class="step-title">FHIR Bundle</span>
+                  <span class="step-desc">ABDM generation</span>
+                </div>
+              </div>
+            </div>
           </div>
         </article>
-      </section>
 
-      <section class="card raw-card">
-        <div class="raw-header">
-          <h2>FHIR Format (Raw JSON)</h2>
-          <button id="copyButton" class="secondary small" type="button" disabled>Copy JSON</button>
-        </div>
-        <pre><code id="rawJson" class="language-json">{}</code></pre>
-      </section>
+        <section id="errorBox" class="error" hidden></section>
+
+        <!-- Validation results -->
+        <section id="validationSection" class="validation-section" hidden>
+          <div class="validation-header">
+            <h2>ABDM FHIR Compliance</h2>
+            <div id="validationScore" class="compliance-score"></div>
+          </div>
+          <div id="validationIssues" class="validation-issues"></div>
+          <div id="fmmReport" class="fmm-report"></div>
+        </section>
+
+
+        <!-- Quick summary row -->
+        <section class="grid" id="summaryGrid">
+          <article class="card">
+            <h2>FHIR Resource Summary</h2>
+            <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
+            <h3>FHIR Profiles</h3>
+            <ul id="profileList" class="profiles"><li>Not available</li></ul>
+          </article>
+
+          <article class="card">
+            <h2>Extracted Clinical Data</h2>
+            <div class="patient">
+              <div><strong>Patient</strong><span id="patientName">Not available</span></div>
+              <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
+              <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Test</th>
+                    <th>LOINC</th>
+                    <th>Result</th>
+                    <th>Unit</th>
+                    <th>Reference Range</th>
+                  </tr>
+                </thead>
+                <tbody id="observationsBody">
+                  <tr><td colspan="5">No observations loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="card raw-card">
+          <div class="raw-header">
+            <h2>FHIR Format (Raw JSON)</h2>
+            <button id="copyButton" class="secondary small" type="button" disabled>Copy JSON</button>
+          </div>
+          <pre><code id="rawJson" class="language-json">{}</code></pre>
+        </section>
+      </div>
+
+      <!-- ═══ TAB: Batch Processing ═══ -->
+      <div class="tab-panel" id="tab-batch">
+        <section class="card upload-card" id="batchDropZone">
+          <h2>Batch Upload</h2>
+          <p class="muted">Drag & drop multiple lab reports (PDFs, images) for bulk processing.</p>
+          <input id="batchFileInput" type="file" accept=".pdf,image/jpeg,image/png" multiple hidden>
+          <button id="batchBrowseBtn" class="primary" type="button">Select Files</button>
+          <div id="batchFileList" class="batch-file-list"></div>
+          <button id="batchStartBtn" class="secondary" type="button" disabled>Start Batch Processing</button>
+        </section>
+
+        <section id="batchProgress" class="card" hidden>
+          <h2>Batch Progress</h2>
+          <div id="batchProgressBar" class="progress-bar-container">
+            <div class="progress-bar" style="width: 0%"></div>
+          </div>
+          <p id="batchStatusText" class="muted">Waiting...</p>
+          <div id="batchFileResults" class="batch-results"></div>
+        </section>
+      </div>
+
+      <!-- ═══ TAB: Patient Records ═══ -->
+      <div class="tab-panel" id="tab-patients">
+        <section class="card">
+          <div class="section-header">
+            <h2>Patient Records</h2>
+            <button id="refreshPatientsBtn" class="secondary small" type="button">Refresh</button>
+          </div>
+          <div id="patientsList" class="patients-grid">
+            <p class="muted">No patients recorded yet. Upload lab reports to populate.</p>
+          </div>
+        </section>
+
+        <section id="patientDetail" class="card patient-report-card" hidden>
+          <div class="section-header" style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px">
+            <h2 id="patientDetailName">Clinical Diagnostic Report (HL7® FHIR® R4)</h2>
+            <button id="closePatientDetailBtn" class="secondary small" type="button">Close Report</button>
+          </div>
+          <div id="patientDetailContent"></div>
+        </section>
+      </div>
+
+      <!-- ═══ TAB: FHIR Explorer ═══ -->
+      <div class="tab-panel" id="tab-explorer">
+        <section class="card">
+          <div class="section-header">
+            <h2>Stored FHIR Bundles</h2>
+            <button id="refreshBundlesBtn" class="secondary small" type="button">Refresh</button>
+          </div>
+          <div id="bundlesList" class="bundles-table-wrap">
+            <p class="muted">No bundles stored yet.</p>
+          </div>
+        </section>
+
+        <section id="bundleDetail" class="card" hidden>
+          <h2>Bundle Detail</h2>
+          <div id="bundleDetailContent"></div>
+        </section>
+      </div>
+
     </main>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=2"></script>
   </body>
 </html>

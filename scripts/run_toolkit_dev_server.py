@@ -33,7 +33,7 @@ def main() -> None:
       else "src/config.yaml"
   )
   config_file = os.environ.get("TOOLKIT_CONFIG_FILE", default_config)
-  port = int(os.environ.get("TOOLKIT_DEV_PORT", "8080"))
+  port = int(os.environ.get("TOOLKIT_DEV_PORT", "8088"))
 
   if not flags.FLAGS.is_parsed():
     flags.FLAGS([
