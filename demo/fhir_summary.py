@@ -84,10 +84,33 @@ def _summarize_patient(patient: dict[str, Any]) -> dict[str, str]:
     given = " ".join(first_name.get("given", []) or [])
     family = first_name.get("family", "")
     text_name = " ".join(part for part in [given, family] if part)
+
+  addresses = patient.get("address", []) or []
+  addr_text = addresses[0].get("text") if addresses else ""
+
+  contacts = patient.get("contact", []) or []
+  guardian_val = contacts[0].get("name", {}).get("text", "") if contacts else ""
+
+  telecoms = patient.get("telecom", []) or []
+  phone_val = next((t.get("value") for t in telecoms if t.get("system") == "phone"), "")
+
+  identifiers = patient.get("identifier", []) or []
+  aadhaar_val = next((i.get("value") for i in identifiers if "aadhaar" in str(i.get("system", "")).lower()), "")
+  abha_val = next((i.get("value") for i in identifiers if "abha" in str(i.get("system", "")).lower()), "")
+  hosp_id = next((i.get("value") for i in identifiers if "hospital.org/patient-id" in str(i.get("system", "")).lower() or (i.get("type", {}).get("coding", [{}])[0].get("code") == "PI")), "")
+  mrn_val = next((i.get("value") for i in identifiers if i.get("type", {}).get("coding", [{}])[0].get("code") == "MR"), "")
+
   return {
       "name": _display(text_name),
       "gender": _display(patient.get("gender")),
       "birthDate": _display(patient.get("birthDate")),
+      "address": _display(addr_text),
+      "aadhaar": _display(aadhaar_val),
+      "abha": _display(abha_val),
+      "phone": _display(phone_val),
+      "guardian": _display(guardian_val),
+      "hospital_id": _display(hosp_id),
+      "mrn": _display(mrn_val),
   }
 
 

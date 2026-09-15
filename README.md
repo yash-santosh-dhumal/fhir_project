@@ -1,13 +1,10 @@
 <!-- 
 
-cd "C:\FHIR toolkit"
-.\.venv-toolkit\Scripts\Activate.ps1
-python scripts\run_toolkit_dev_server.py
+.\.venv-toolkit\Scripts\python.exe scripts\run_toolkit_dev_server.py
 
 
-cd "C:\FHIR toolkit"
-.\.venv-toolkit\Scripts\Activate.ps1
-python demo\app.py
+.\.venv-toolkit\Scripts\python.exe demo\app.py
+
 
  -->
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 import threading
@@ -21,15 +23,31 @@ for _p in (str(_DEMO_DIR), str(_REPO_ROOT)):
     sys.path.insert(0, _p)
 
 try:
-  from batch_processor import BatchProcessor
+  from archive_analyzer import (
+      ArchiveAnalysisResult,
+      ArchiveDocument,
+      ArchiveFormatError,
+      ArchiveSecurityError,
+      extract_and_analyze_archive,
+  )
   from fhir_store import FhirStore
   from fhir_summary import summarize_payload
+  from fhir_unifier import unify_patient_bundles
   from fhir_validator import validate_bundle
+  from gemini_ocr import process_archive_documents_with_gemini
 except ImportError:
-  from demo.batch_processor import BatchProcessor
+  from demo.archive_analyzer import (
+      ArchiveAnalysisResult,
+      ArchiveDocument,
+      ArchiveFormatError,
+      ArchiveSecurityError,
+      extract_and_analyze_archive,
+  )
   from demo.fhir_store import FhirStore
   from demo.fhir_summary import summarize_payload
+  from demo.fhir_unifier import unify_patient_bundles
   from demo.fhir_validator import validate_bundle
+  from demo.gemini_ocr import process_archive_documents_with_gemini
 
 try:
   from dotenv import load_dotenv
@@ -40,15 +58,22 @@ except ImportError:
 
 TOOLKIT_URL = os.environ.get("TOOLKIT_URL", "http://localhost:8088").rstrip("/")
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TOOLKIT_TIMEOUT_SECONDS", "180"))
-SUPPORTED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+SUPPORTED_MIME_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 app = Flask(__name__)
 fhir_store = FhirStore()
-batch_processor = BatchProcessor(
-    toolkit_url=TOOLKIT_URL,
-    fhir_store=fhir_store,
-    timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-)
+log = logging.getLogger(__name__)
 
 
 @app.get("/")
@@ -115,11 +140,126 @@ def convert():
 
   mime_type = uploaded.mimetype or _infer_mime_type(uploaded.filename)
   if mime_type not in SUPPORTED_MIME_TYPES:
-    return _error("Supported formats are PDF, JPEG, and PNG.", 400)
+    return _error("Supported formats are PDF, JPEG, PNG, WebP, BMP, TIFF, and ZIP archives.", 400)
 
   file_bytes = uploaded.read()
   if not file_bytes:
     return _error("The uploaded file is empty.", 400)
+
+  # Check if uploaded file is a ZIP archive containing multiple documents for the same patient
+  if mime_type in ("application/zip", "application/x-zip-compressed") or (uploaded.filename and uploaded.filename.lower().endswith(".zip")):
+    try:
+      analysis = extract_and_analyze_archive(file_bytes, archive_name=uploaded.filename or "patient_archive.zip")
+    except (ArchiveSecurityError, ArchiveFormatError) as exc:
+      return _error(f"Archive error: {exc}", 400)
+    except Exception as exc:
+      return _error(f"Failed to process archive: {exc}", 500)
+
+    if analysis.document_count == 0:
+      return _error("No valid medical documents (PDF or images) found in the ZIP archive.", 400)
+
+    start = time.perf_counter()
+    log.info("Processing all %d documents from ZIP '%s' with Gemini high-level OCR...",
+             analysis.document_count, analysis.archive_name)
+
+    # 1. High-level OCR and structured information extraction across ALL documents
+    gemini_extraction = process_archive_documents_with_gemini(analysis.documents)
+
+    # 2. Check candidate lab reports with toolkit API for LOINC bundles
+    lab_keywords = {"lab", "pathology", "blood", "biochemistry", "cbc", "cbp", "serum", "test", "urine", "diagnostic", "culture", "profile", "lipid", "lft", "rft", "kft"}
+    candidate_lab_docs = []
+    for doc in analysis.documents:
+      fname_lower = doc.filename.lower()
+      is_candidate = any(k in fname_lower for k in lab_keywords)
+      if not is_candidate and gemini_extraction.documents:
+        for edoc in gemini_extraction.documents:
+          if edoc.filename == doc.filename or edoc.relative_path == doc.relative_path:
+            if any(k in edoc.document_type.lower() for k in lab_keywords):
+              is_candidate = True
+              break
+      if is_candidate:
+        candidate_lab_docs.append(doc)
+
+    extracted_bundles: list[dict[str, Any]] = []
+    source_names: list[str] = []
+
+    def _call_toolkit_api(doc_bytes: bytes, doc_mime: str, retry: int = 0) -> dict:
+      resp = requests.post(
+          f"{TOOLKIT_URL}/document_to_fhir",
+          data=doc_bytes,
+          headers={"Content-Type": doc_mime},
+          timeout=REQUEST_TIMEOUT_SECONDS,
+      )
+      if not resp.ok:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+      pl = resp.json()
+      std_docs = pl.get("standardized_medical_documents") or []
+      if not std_docs and retry < 1:
+        time.sleep(1.5)
+        return _call_toolkit_api(doc_bytes, doc_mime, retry + 1)
+      return pl
+
+    if candidate_lab_docs:
+      log.info("Checking %d candidate lab reports with toolkit API...", len(candidate_lab_docs))
+      for doc in candidate_lab_docs:
+        try:
+          doc_bytes, doc_mime = _optimize_image_if_needed(doc.file_bytes, doc.mime_type)
+          pl = _call_toolkit_api(doc_bytes, doc_mime)
+          for sdoc in (pl.get("standardized_medical_documents") or []):
+            if isinstance(sdoc, dict):
+              fb = sdoc.get("fhir_bundle")
+              if isinstance(fb, dict) and fb.get("resourceType") == "Bundle":
+                extracted_bundles.append(fb)
+                source_names.append(doc.relative_path)
+        except Exception as exc:
+          log.warning("Toolkit API skipped for candidate '%s': %s", doc.relative_path, exc)
+
+    # 3. Unify all bundles and Gemini-extracted demographics & observations
+    master_bundle = unify_patient_bundles(
+        extracted_bundles,
+        archive_filename=uploaded.filename or "patient_archive.zip",
+        source_filenames=source_names,
+        gemini_extraction=gemini_extraction,
+    )
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    # Store master bundle in SQLite under the unified patient
+    bid = fhir_store.store_bundle(
+        master_bundle,
+        source_filename=f"{uploaded.filename} ({analysis.document_count} documents unified)",
+        document_type="CLINICAL_RECORD",
+    )
+
+    # Summarize and validate unified bundle
+    unified_payload = {"standardized_medical_documents": [{"fhir_bundle": master_bundle, "document_type": "CLINICAL_RECORD"}]}
+    summary = summarize_payload(unified_payload)
+    validation = validate_bundle(master_bundle)
+
+    return jsonify({
+        "duration_ms": duration_ms,
+        "summary": summary,
+        "raw": master_bundle,
+        "validation": validation,
+        "stored_bundle_ids": [bid],
+        "is_archive": True,
+        "archive_info": {
+            "archive_name": uploaded.filename,
+            "total_files_in_zip": analysis.total_entries_scanned,
+            "documents_found": analysis.document_count,
+            "documents_processed": analysis.document_count,
+            "documents_unified": len(extracted_bundles) if extracted_bundles else analysis.document_count,
+            "patient_name": gemini_extraction.demographics.name or "Patient",
+            "birth_date": gemini_extraction.demographics.birth_date or "N/A",
+            "gender": gemini_extraction.demographics.gender or "unknown",
+            "aadhaar_number": gemini_extraction.demographics.aadhaar_number or "N/A",
+            "address": gemini_extraction.demographics.address or "N/A",
+            "observations_count": len(summary.get("observations", [])),
+            "classified_documents": [d.to_dict() for d in gemini_extraction.documents],
+            "source_files": source_names if extracted_bundles else [d.relative_path for d in analysis.documents],
+            "skipped_count": analysis.skipped_count,
+        },
+    })
 
   file_bytes, mime_type = _optimize_image_if_needed(file_bytes, mime_type)
 
@@ -143,50 +283,57 @@ def convert():
 
   duration_ms = round((time.perf_counter() - start) * 1000, 2)
   safe_error = _safe_toolkit_error(toolkit_response)
-  if not toolkit_response.ok:
-    if toolkit_response.status_code == 422:
-      message = (
-          "This document could not be processed as a supported "
-          "laboratory/diagnostic report."
+  # If toolkit cannot process this document (e.g. Aadhaar, Discharge Summary, Non-Lab),
+  # fall back to Gemini high-level OCR to extract patient demographics and generate FHIR
+  if not toolkit_response.ok or not summary.get("bundle", {}).get("found"):
+    log.info("Toolkit could not convert '%s' (status=%s); executing Gemini high-level OCR fallback...",
+             uploaded.filename, toolkit_response.status_code)
+    try:
+      single_doc = ArchiveDocument(
+          filename=uploaded.filename or "document",
+          relative_path=uploaded.filename or "document",
+          folder_path="",
+          file_bytes=file_bytes,
+          mime_type=mime_type,
+          size_bytes=len(file_bytes),
       )
-      if safe_error:
-        message = f"{message} Toolkit detail: {safe_error}"
-      return _error(message, 422, toolkit_response.status_code, duration_ms)
-    return _error(
-        f"Toolkit API error HTTP {toolkit_response.status_code}: {safe_error}",
-        502,
-        toolkit_response.status_code,
-        duration_ms,
-    )
-
-  try:
-    payload: dict[str, Any] = toolkit_response.json()
-  except ValueError:
-    return _error(
-        "The toolkit returned a response that could not be parsed as JSON.",
-        502,
-        toolkit_response.status_code,
-        duration_ms,
-    )
-
-  summary = summarize_payload(payload)
-  standardized_docs = payload.get("standardized_medical_documents", [])
-  if not summary.get("bundle", {}).get("found"):
-    if not standardized_docs:
+      gemini_extraction = process_archive_documents_with_gemini([single_doc])
+      master_bundle = unify_patient_bundles(
+          [],
+          archive_filename=uploaded.filename or "document",
+          source_filenames=[uploaded.filename or "document"],
+          gemini_extraction=gemini_extraction,
+      )
+      bid = fhir_store.store_bundle(
+          master_bundle,
+          source_filename=uploaded.filename or "document",
+          document_type="CLINICAL_RECORD",
+      )
+      unified_payload = {"standardized_medical_documents": [{"fhir_bundle": master_bundle, "document_type": "CLINICAL_RECORD"}]}
+      summary = summarize_payload(unified_payload)
+      validation = validate_bundle(master_bundle)
+      return jsonify({
+          "duration_ms": duration_ms,
+          "summary": summary,
+          "raw": master_bundle,
+          "validation": validation,
+          "stored_bundle_ids": [bid],
+      })
+    except Exception as exc:
+      log.error("Gemini fallback failed for '%s': %s", uploaded.filename, exc)
+      if not toolkit_response.ok:
+        return _error(
+            f"Document conversion failed: {safe_error}",
+            422,
+            toolkit_response.status_code,
+            duration_ms,
+        )
       return _error(
-          "The toolkit did not classify this upload as a supported laboratory "
-          "report. Try again, or upload a clearer typed lab report image/PDF. "
-          "If this repeats, the configured Gemini classifier may be overloaded.",
+          "The document could not be converted to a FHIR bundle.",
           422,
           toolkit_response.status_code,
           duration_ms,
       )
-    return _error(
-        "The toolkit processed the upload but did not return a FHIR Bundle.",
-        422,
-        toolkit_response.status_code,
-        duration_ms,
-    )
 
   # Auto-store bundle in FHIR store
   bundles_from_payload = []
@@ -212,60 +359,6 @@ def convert():
       "validation": validation,
       "stored_bundle_ids": stored_bundle_ids,
   })
-
-
-# ── Batch upload ──
-
-_batch_jobs: dict[str, dict] = {}
-
-
-def _process_single_file_for_batch(batch_id: str, filename: str, file_bytes: bytes, mime_type: str):
-    """Process a single file as part of a batch (runs in a thread)."""
-    batch_processor.process_document(
-        filename=filename,
-        file_bytes=file_bytes,
-        mime_type=mime_type,
-        batch_id=batch_id,
-    )
-
-
-@app.post("/api/batch-upload")
-def batch_upload():
-    files = request.files.getlist("files")
-    if not files:
-        return _error("No files uploaded.", 400)
-
-    batch_id = str(uuid_mod.uuid4())
-    _batch_jobs[batch_id] = {"total": len(files), "started": time.time()}
-
-    for f in files:
-        mime = f.mimetype or _infer_mime_type(f.filename or "")
-        if mime not in SUPPORTED_MIME_TYPES:
-            fhir_store.log_processing(batch_id, f.filename or "unknown", "error", f"Unsupported type: {mime}")
-            continue
-        file_bytes = f.read()
-        if not file_bytes:
-            fhir_store.log_processing(batch_id, f.filename or "unknown", "error", "Empty file")
-            continue
-        # Launch processing in a thread
-        t = threading.Thread(
-            target=_process_single_file_for_batch,
-            args=(batch_id, f.filename or "unknown", file_bytes, mime),
-            daemon=True,
-        )
-        t.start()
-
-    return jsonify({"batch_id": batch_id, "file_count": len(files)})
-
-
-@app.get("/api/batch-status/<batch_id>")
-def batch_status(batch_id: str):
-    logs = fhir_store.get_batch_status(batch_id)
-    if not logs:
-        return _error("Batch not found.", 404)
-    total = len(logs)
-    done = sum(1 for l in logs if l["status"] in ("success", "error"))
-    return jsonify({"batch_id": batch_id, "total": total, "done": done, "files": logs})
 
 
 # ── Patient records ──
@@ -369,11 +462,27 @@ def _infer_mime_type(filename: str) -> str:
     return "image/jpeg"
   if lower.endswith(".png"):
     return "image/png"
+  if lower.endswith(".webp"):
+    return "image/webp"
+  if lower.endswith(".bmp"):
+    return "image/bmp"
+  if lower.endswith((".tiff", ".tif")):
+    return "image/tiff"
+  if lower.endswith((".doc", ".docx")):
+    return "application/msword"
+  if lower.endswith(".zip"):
+    return "application/zip"
   return ""
 
 
 if __name__ == "__main__":
+  logging.basicConfig(
+      level=logging.INFO,
+      format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+      datefmt="%H:%M:%S",
+  )
   app.config["TEMPLATES_AUTO_RELOAD"] = True
   app.jinja_env.auto_reload = True
+  app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB max upload
   app.run(host="127.0.0.1", port=int(os.environ.get("DEMO_PORT", "5000")))
 

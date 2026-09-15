@@ -21,9 +21,11 @@ from typing import Any, Callable
 import requests
 
 try:
+    from archive_analyzer import extract_and_analyze_archive, ArchiveAnalysisResult
     from fhir_store import FhirStore
     from fhir_validator import validate_bundle
 except ImportError:
+    from demo.archive_analyzer import extract_and_analyze_archive, ArchiveAnalysisResult
     from demo.fhir_store import FhirStore
     from demo.fhir_validator import validate_bundle
 
@@ -33,6 +35,11 @@ SUPPORTED_MIME_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".zip": "application/zip",
 }
 
 
@@ -243,8 +250,25 @@ class BatchProcessor:
         progress_callback: Callable[[int, int, BatchItemResult], None] | None = None,
         concurrent_execution: bool = True,
     ) -> BatchSummary:
-        """Process a list of files as a batch."""
         bid = batch_id or str(uuid.uuid4())
+        # Expand any archive (.zip) files into individual documents
+        expanded_files: list[tuple[str, bytes, str]] = []
+        for fname, fbytes, fmime in files:
+            if fname.lower().endswith(".zip") or fmime in ("application/zip", "application/x-zip-compressed"):
+                try:
+                    analysis = extract_and_analyze_archive(fbytes, archive_name=fname)
+                    for doc in analysis.documents:
+                        expanded_files.append((doc.relative_path, doc.file_bytes, doc.mime_type))
+                    if not analysis.documents:
+                        self.fhir_store.log_processing(
+                            bid, fname, status="error", error_message="No valid medical documents (PDF/image) found in archive"
+                        )
+                except Exception as exc:
+                    self.fhir_store.log_processing(bid, fname, status="error", error_message=f"Archive error: {exc}")
+            else:
+                expanded_files.append((fname, fbytes, fmime))
+
+        files = expanded_files
         total = len(files)
         summary = BatchSummary(batch_id=bid, total=total)
         start_batch = time.perf_counter()

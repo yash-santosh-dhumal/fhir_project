@@ -1,5 +1,6 @@
 """Integration tests for demo Flask app endpoints."""
 
+import io
 import os
 import tempfile
 import unittest
@@ -133,6 +134,138 @@ class TestAppEndpoints(unittest.TestCase):
         resp_p_404 = self.client.delete("/api/patients/non-existent-patient")
         self.assertEqual(resp_p_404.status_code, 404)
 
+    def _create_test_zip(self, file_map: dict[str, bytes]) -> io.BytesIO:
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path, data in file_map.items():
+                zf.writestr(path, data)
+        buf.seek(0)
+        return buf
+
+    @patch("requests.post")
+    def test_convert_multi_document_zip_success(self, mock_post):
+        mock_bundle_1 = {
+            "resourceType": "Bundle",
+            "id": "bundle-part-1",
+            "type": "document",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Patient",
+                        "id": "pat-1",
+                        "name": [{"text": "Alice Doe"}],
+                        "gender": "female",
+                        "birthDate": "1988-04-12",
+                    }
+                },
+                {
+                    "resource": {
+                        "resourceType": "Observation",
+                        "id": "obs-hgb",
+                        "status": "final",
+                        "code": {"coding": [{"system": "http://loinc.org", "code": "718-7", "display": "Hemoglobin"}]},
+                        "valueQuantity": {"value": 13.5, "unit": "g/dL"},
+                    }
+                },
+            ],
+        }
+        mock_bundle_2 = {
+            "resourceType": "Bundle",
+            "id": "bundle-part-2",
+            "type": "document",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Patient",
+                        "id": "pat-1",
+                        "name": [{"text": "Alice Doe"}],
+                        "gender": "female",
+                        "birthDate": "1988-04-12",
+                    }
+                },
+                {
+                    "resource": {
+                        "resourceType": "Observation",
+                        "id": "obs-glu",
+                        "status": "final",
+                        "code": {"coding": [{"system": "http://loinc.org", "code": "2345-7", "display": "Glucose"}]},
+                        "valueQuantity": {"value": 95, "unit": "mg/dL"},
+                    }
+                },
+            ],
+        }
+
+        mock_resp_1 = MagicMock()
+        mock_resp_1.ok = True
+        mock_resp_1.status_code = 200
+        mock_resp_1.json.return_value = {
+            "standardized_medical_documents": [
+                {"document_type": "LABORATORY_REPORT", "fhir_bundle": mock_bundle_1}
+            ]
+        }
+
+        mock_resp_2 = MagicMock()
+        mock_resp_2.ok = True
+        mock_resp_2.status_code = 200
+        mock_resp_2.json.return_value = {
+            "standardized_medical_documents": [
+                {"document_type": "LABORATORY_REPORT", "fhir_bundle": mock_bundle_2}
+            ]
+        }
+
+        mock_post.side_effect = [mock_resp_1, mock_resp_2]
+
+        zip_buf = self._create_test_zip({
+            "Reports/CBC/cbc.pdf": b"%PDF-1.4 test cbc",
+            "Reports/Biochemistry/glucose.jpg": b"\xff\xd8\xff test jpg",
+            "Reports/notes.txt": b"doctor notes - ignored file",
+        })
+
+        resp = self.client.post(
+            "/api/convert",
+            data={"file": (zip_buf, "alice_records.zip")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("is_archive"))
+        archive_info = data.get("archive_info", {})
+        self.assertEqual(archive_info.get("documents_unified"), 2)
+        self.assertEqual(archive_info.get("skipped_count"), 1)
+        self.assertIn("Reports/CBC/cbc.pdf", archive_info.get("source_files", []))
+        self.assertIn("Reports/Biochemistry/glucose.jpg", archive_info.get("source_files", []))
+
+        # Check that observations from both documents are in the unified bundle
+        raw_bundle = data.get("raw", {})
+        self.assertEqual(raw_bundle.get("resourceType"), "Bundle")
+        resources = [e.get("resource", {}).get("resourceType") for e in raw_bundle.get("entry", [])]
+        self.assertIn("Composition", resources)
+        self.assertIn("Patient", resources)
+        self.assertIn("Observation", resources)
+
+        # Unified summary
+        obs_summary = data.get("summary", {}).get("observations", [])
+        self.assertEqual(len(obs_summary), 2)
+        obs_names = [o.get("test") for o in obs_summary]
+        self.assertIn("Hemoglobin", obs_names)
+        self.assertIn("Glucose", obs_names)
+
+    def test_convert_zip_no_valid_docs(self):
+        zip_buf = self._create_test_zip({
+            "notes.txt": b"not a supported medical document format",
+            "readme.md": b"# Readme",
+        })
+        resp = self.client.post(
+            "/api/convert",
+            data={"file": (zip_buf, "invalid.zip")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.get_json()
+        self.assertIn("No valid medical documents", data.get("error", ""))
+
 
 if __name__ == "__main__":
     unittest.main()
+

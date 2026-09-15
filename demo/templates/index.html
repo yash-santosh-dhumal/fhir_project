@@ -35,7 +35,6 @@
       <!-- Tab navigation -->
       <nav class="tab-nav" id="tabNav">
         <button class="tab-btn active" data-tab="upload">Upload &amp; Convert</button>
-        <button class="tab-btn" data-tab="batch">Batch Processing</button>
         <button class="tab-btn" data-tab="patients">Patient Records</button>
         <button class="tab-btn" data-tab="explorer">FHIR Explorer</button>
       </nav>
@@ -44,9 +43,9 @@
       <div class="tab-panel active" id="tab-upload">
         <section class="upload-section">
           <article class="card upload-card" id="dropZone">
-            <h2>Upload Laboratory Report</h2>
-            <p class="muted">Supported formats: PDF, JPEG, PNG</p>
-            <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png" hidden>
+            <h2>Upload Patient Document or ZIP Archive</h2>
+            <p class="muted">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
+            <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png,image/webp,image/bmp,image/tiff,.zip,application/zip,application/x-zip-compressed" hidden>
             <div class="upload-btn-group">
               <button id="browseButton" class="primary" type="button">Browse File</button>
               <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
@@ -137,6 +136,12 @@
               <div><strong>Patient</strong><span id="patientName">Not available</span></div>
               <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
               <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
+              <div><strong>Aadhaar / UID</strong><span id="patientAadhaar">Not available</span></div>
+              <div><strong>ABHA / Scheme</strong><span id="patientAbha">Not available</span></div>
+              <div><strong>Guardian / Father</strong><span id="patientGuardian">Not available</span></div>
+              <div><strong>Mobile / Phone</strong><span id="patientPhone">Not available</span></div>
+              <div><strong>Hospital IP / MRN</strong><span id="patientHospId">Not available</span></div>
+              <div><strong>Address</strong><span id="patientAddress">Not available</span></div>
             </div>
             <div class="table-wrap">
               <table>
@@ -163,27 +168,6 @@
             <button id="copyButton" class="secondary small" type="button" disabled>Copy JSON</button>
           </div>
           <pre><code id="rawJson" class="language-json">{}</code></pre>
-        </section>
-      </div>
-
-      <!-- ═══ TAB: Batch Processing ═══ -->
-      <div class="tab-panel" id="tab-batch">
-        <section class="card upload-card" id="batchDropZone">
-          <h2>Batch Upload</h2>
-          <p class="muted">Drag & drop multiple lab reports (PDFs, images) for bulk processing.</p>
-          <input id="batchFileInput" type="file" accept=".pdf,image/jpeg,image/png" multiple hidden>
-          <button id="batchBrowseBtn" class="primary" type="button">Select Files</button>
-          <div id="batchFileList" class="batch-file-list"></div>
-          <button id="batchStartBtn" class="secondary" type="button" disabled>Start Batch Processing</button>
-        </section>
-
-        <section id="batchProgress" class="card" hidden>
-          <h2>Batch Progress</h2>
-          <div id="batchProgressBar" class="progress-bar-container">
-            <div class="progress-bar" style="width: 0%"></div>
-          </div>
-          <p id="batchStatusText" class="muted">Waiting...</p>
-          <div id="batchFileResults" class="batch-results"></div>
         </section>
       </div>
 

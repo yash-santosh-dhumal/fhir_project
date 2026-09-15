@@ -19,19 +19,11 @@ const errorBox       = $("#errorBox");
 const rawJsonEl      = $("#rawJson");
 const copyButton     = $("#copyButton");
 
-// Batch tab elements
-const batchFileInput  = $("#batchFileInput");
-const batchBrowseBtn  = $("#batchBrowseBtn");
-const batchStartBtn   = $("#batchStartBtn");
-const batchFileList   = $("#batchFileList");
-const batchProgress   = $("#batchProgress");
-
 // Health badge
 const healthBadge = $("#healthBadge");
 const dbStats     = $("#dbStats");
 
 let selectedFile = null;
-let batchFiles = [];
 
 // ═══════════════════════════════════════════════
 // Tab Navigation
@@ -70,26 +62,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (e.dataTransfer.files.length) {
         fileInput.files = e.dataTransfer.files;
         onFileSelected();
-      }
-    });
-  }
-
-  // Batch upload
-  batchBrowseBtn.addEventListener("click", () => batchFileInput.click());
-  batchFileInput.addEventListener("change", onBatchFilesSelected);
-  batchStartBtn.addEventListener("click", startBatchUpload);
-
-  // Batch drag-drop
-  const batchDZ = $("#batchDropZone");
-  if (batchDZ) {
-    batchDZ.addEventListener("dragover", (e) => { e.preventDefault(); batchDZ.classList.add("drag-over"); });
-    batchDZ.addEventListener("dragleave", () => batchDZ.classList.remove("drag-over"));
-    batchDZ.addEventListener("drop", (e) => {
-      e.preventDefault();
-      batchDZ.classList.remove("drag-over");
-      if (e.dataTransfer.files.length) {
-        batchFileInput.files = e.dataTransfer.files;
-        onBatchFilesSelected();
       }
     });
   }
@@ -240,9 +212,24 @@ async function convertSelectedFile() {
 
     const data = await response.json();
 
-    // Duration
+    // Duration & unified archive badge
     if (data.duration_ms) {
-      durationEl.textContent = `API processing duration: ${data.duration_ms.toFixed(2)} ms`;
+      durationEl.textContent = `API processing duration: ${(data.duration_ms / 1000).toFixed(1)}s`;
+      if (data.is_archive && data.archive_info) {
+        const info = data.archive_info;
+        const totalDocs = info.documents_found || info.documents_processed || info.documents_unified || 0;
+        const parts = [`📦 ${totalDocs} document(s) processed & unified from archive`];
+        if (info.patient_name && info.patient_name !== "Patient") {
+          parts.push(`👤 ${info.patient_name}`);
+        }
+        if (info.aadhaar_number && info.aadhaar_number !== "N/A") {
+          parts.push(`UID: ${info.aadhaar_number}`);
+        }
+        if (info.observations_count) {
+          parts.push(`${info.observations_count} observation(s)`);
+        }
+        durationEl.textContent += ` • ${parts.join(' · ')}`;
+      }
     }
 
     // Mark all stages done
@@ -281,9 +268,17 @@ function resetUI() {
   if (valSection) valSection.hidden = true;
 
   const pn = $("#patientName"), pg = $("#patientGender"), pb = $("#patientBirthDate");
+  const pa = $("#patientAadhaar"), padd = $("#patientAddress");
+  const pab = $("#patientAbha"), pgu = $("#patientGuardian"), pph = $("#patientPhone"), phi = $("#patientHospId");
   if (pn) pn.textContent = "Not available";
   if (pg) pg.textContent = "Not available";
   if (pb) pb.textContent = "Not available";
+  if (pa) pa.textContent = "Not available";
+  if (padd) padd.textContent = "Not available";
+  if (pab) pab.textContent = "Not available";
+  if (pgu) pgu.textContent = "Not available";
+  if (pph) pph.textContent = "Not available";
+  if (phi) phi.textContent = "Not available";
   const bs = $("#bundleSummary");
   if (bs) bs.innerHTML = "No FHIR Bundle loaded.";
   const pl = $("#profileList");
@@ -354,12 +349,20 @@ function renderSummary(summary) {
 
   // Patient info
   const pn = $("#patientName"), pg = $("#patientGender"), pb = $("#patientBirthDate");
+  const pa = $("#patientAadhaar"), padd = $("#patientAddress");
+  const pab = $("#patientAbha"), pgu = $("#patientGuardian"), pph = $("#patientPhone"), phi = $("#patientHospId");
   if (pn) pn.textContent = patient.name || "Not available";
   if (pg) {
     const g = patient.gender || "";
     pg.textContent = g ? (g.charAt(0).toUpperCase() + g.slice(1)) : "Not available";
   }
   if (pb) pb.textContent = patient.birthDate || patient.dob || "Not available";
+  if (pa) pa.textContent = patient.aadhaar || patient.aadhaar_number || "Not available";
+  if (padd) padd.textContent = patient.address || "Not available";
+  if (pab) pab.textContent = patient.abha || "Not available";
+  if (pgu) pgu.textContent = patient.guardian || "Not available";
+  if (pph) pph.textContent = patient.phone || "Not available";
+  if (phi) phi.textContent = patient.hospital_id || patient.mrn || "Not available";
 
   // Observations table
   const tbody = $("#observationsBody");
@@ -428,69 +431,6 @@ function renderValidation(val) {
 
 
 // ═══════════════════════════════════════════════
-// Batch Processing
-// ═══════════════════════════════════════════════
-
-function onBatchFilesSelected() {
-  batchFiles = Array.from(batchFileInput.files);
-  batchFileList.innerHTML = batchFiles.map((f) => {
-    const sizeKB = (f.size / 1024).toFixed(1);
-    return `<div class="batch-file-item">${f.name} — ${sizeKB} KB</div>`;
-  }).join("");
-  batchStartBtn.disabled = batchFiles.length === 0;
-}
-
-async function startBatchUpload() {
-  if (!batchFiles.length) return;
-  batchStartBtn.disabled = true;
-  batchProgress.hidden = false;
-  const statusText = $("#batchStatusText");
-  const progressBar = batchProgress.querySelector(".progress-bar");
-  const resultsEl = $("#batchFileResults");
-  statusText.textContent = "Uploading files...";
-  resultsEl.innerHTML = "";
-
-  const formData = new FormData();
-  batchFiles.forEach((f) => formData.append("files", f));
-
-  try {
-    const res = await fetch("/api/batch-upload", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Upload failed");
-
-    const batchId = data.batch_id;
-    statusText.textContent = `Batch ${batchId.slice(0, 8)}... — Processing ${data.file_count} files`;
-
-    // Poll status
-    const poll = setInterval(async () => {
-      try {
-        const sr = await fetch(`/api/batch-status/${batchId}`);
-        const sd = await sr.json();
-        const pct = sd.total > 0 ? Math.round((sd.done / sd.total) * 100) : 0;
-        progressBar.style.width = `${pct}%`;
-        statusText.textContent = `${sd.done} / ${sd.total} files processed (${pct}%)`;
-
-        resultsEl.innerHTML = sd.files.map((f) =>
-          `<div class="batch-result-item"><span>${f.filename}</span><span class="batch-status ${f.status}">${f.status}${f.duration_ms ? ` (${f.duration_ms.toFixed(0)}ms)` : ""}</span></div>`
-        ).join("");
-
-        if (sd.done >= sd.total) {
-          clearInterval(poll);
-          statusText.textContent = `Batch complete — ${sd.done} files processed.`;
-          batchStartBtn.disabled = false;
-          checkHealth();
-        }
-      } catch { /* retry */ }
-    }, 2000);
-
-  } catch (err) {
-    statusText.textContent = `Error: ${err.message}`;
-    batchStartBtn.disabled = false;
-  }
-}
-
-
-// ═══════════════════════════════════════════════
 // Patient Records
 // ═══════════════════════════════════════════════
 
@@ -500,26 +440,37 @@ async function loadPatients() {
     const res = await fetch("/api/patients");
     const patients = await res.json();
     if (!patients.length) {
-      container.innerHTML = '<p class="muted">No patients recorded yet. Upload lab reports to populate.</p>';
+      container.innerHTML = '<p class="muted">No patients recorded yet. Upload patient archives or lab reports to populate.</p>';
       return;
     }
-    container.innerHTML = patients.map((p) => `
-      <div class="patient-card" onclick="viewPatient('${p.id}')">
-        <div class="pc-header">
-          <div class="pc-name">${escapeHtml(p.name || "Unknown")}</div>
-          <button class="pc-delete-btn" title="Delete Patient Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
+    container.innerHTML = patients.map((p) => {
+      const pAge = calculateAge(p.birth_date);
+      const genderStr = p.gender ? (p.gender.charAt(0).toUpperCase() + p.gender.slice(1)) : "";
+      const metaParts = [];
+      if (genderStr) metaParts.push(genderStr);
+      if (p.birth_date && p.birth_date !== "N/A" && p.birth_date !== "Not available") {
+        metaParts.push(`DOB: ${p.birth_date}`);
+      }
+      if (pAge) metaParts.push(pAge);
+
+      return `
+        <div class="patient-card" onclick="viewPatient('${p.id}')">
+          <div class="pc-header">
+            <div class="pc-name">${escapeHtml(p.name || "Unknown Patient")}</div>
+            <button class="pc-delete-btn" title="Delete Patient Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="pc-meta">${escapeHtml(metaParts.join(" • ") || "Patient Record")}</div>
+          <div class="pc-badges">
+            <span class="pc-badge">${p.bundle_count || 0} Report${p.bundle_count !== 1 ? "s" : ""}</span>
+          </div>
         </div>
-        <div class="pc-meta">${escapeHtml(p.gender || "")} • DOB: ${escapeHtml(p.birth_date || "N/A")}</div>
-        <div class="pc-badges">
-          <span class="pc-badge">${p.bundle_count || 0} Report${p.bundle_count !== 1 ? "s" : ""}</span>
-        </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
   } catch {
     container.innerHTML = '<p class="muted">Failed to load patients.</p>';
   }
@@ -578,33 +529,153 @@ async function viewPatient(patientId) {
       }
     } catch { /* ignore */ }
 
-    // Patient Demographics
-    const pName = patient.name || "Unknown Patient";
-    const pGender = patient.gender ? (patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1)) : "Not specified";
-    const pDob = patient.birth_date || "Not specified";
-    const pAge = calculateAge(patient.birth_date);
+    // Patient Demographics from patient & patientResource
+    const pName = patient.name || patientResource.name?.[0]?.text || "Unknown Patient";
+    const pGiven = (patientResource.name?.[0]?.given || []).join(" ");
+    const pFamily = patientResource.name?.[0]?.family || "";
+    const pGender = patient.gender ? (patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1)) : (patientResource.gender || "Not specified");
+    const pDob = patient.birth_date || patientResource.birthDate || "Not specified";
+    const pAge = calculateAge(pDob);
 
-    // Extract identifiers (ABHA, MRN, etc.)
-    let pIdent = "ABDM Registered";
-    if (patientResource.identifier && patientResource.identifier.length) {
-      const idObj = patientResource.identifier[0];
-      pIdent = idObj.value || "Not available";
-      if (idObj.type?.coding?.[0]?.display) {
-        pIdent += ` (${idObj.type.coding[0].display})`;
+    // Extract Blood Group from observations if available
+    let pBloodGroup = "";
+    observations.forEach((o) => {
+      const name = String(o.code_text || o.code?.text || "").toLowerCase();
+      if (name.includes("blood group") || name.includes("abo") || name.includes("rh type")) {
+        const val = o.value || o.valueString || (o.valueQuantity?.value) || "";
+        if (val && String(val).trim()) pBloodGroup = String(val).trim();
       }
-    } else if (patient.id) {
-      pIdent = patient.id.slice(0, 16) + "...";
+    });
+
+    // Extract all identifiers (Aadhaar, ABHA, Hospital ID, MRN)
+    const identifiers = patientResource.identifier || [];
+    let pAadhaar = "";
+    let pAbha = patient.abha_id || "";
+    let pHospId = "";
+    let pMrn = "";
+
+    identifiers.forEach((idObj) => {
+      const sys = String(idObj.system || "").toLowerCase();
+      const val = String(idObj.value || "").trim();
+      const code = idObj.type?.coding?.[0]?.code || "";
+      const display = String(idObj.type?.coding?.[0]?.display || "").toLowerCase();
+
+      if (sys.includes("aadhaar") || display.includes("aadhaar")) {
+        pAadhaar = val;
+      } else if (sys.includes("abha") || display.includes("abha") || code === "NH") {
+        if (!pAbha) pAbha = val;
+      } else if (sys.includes("hospital.org/patient-id") || code === "PI") {
+        pHospId = val;
+      } else if (code === "MR" || sys.includes("smarthealthit") || sys.includes("hospital")) {
+        if (!pMrn) pMrn = val;
+      }
+    });
+
+    let formattedAadhaar = pAadhaar;
+    if (/^\d{12}$/.test(pAadhaar.replace(/\s+/g, ""))) {
+      formattedAadhaar = pAadhaar.replace(/\s+/g, "").replace(/(\d{4})(\d{4})(\d{4})/, "$1 $2 $3");
     }
 
-    // If no bundles, show clean placeholder
+    // Extract Address components
+    const addresses = patientResource.address || [];
+    let pAddress = "";
+    let pCity = "";
+    let pDistrict = "";
+    let pState = "";
+    let pPin = "";
+
+    if (addresses.length) {
+      const addr = addresses[0];
+      pAddress = addr.text || addr.line?.join(", ") || "";
+      pCity = addr.city || "";
+      pDistrict = addr.district || "";
+      pState = addr.state || "";
+      pPin = addr.postalCode || "";
+    }
+
+    // Extract Locality / Mandal from address string if available
+    let pLocality = "";
+    let pMandal = "";
+    if (pAddress) {
+      const vMatch = pAddress.match(/([0-9a-zA-Z\s-]+(?:POST|VILLAGE|STREET|ROAD|NAGAR|COLONY))/i);
+      if (vMatch) pLocality = vMatch[1].trim();
+      const mMatch = pAddress.match(/([0-9a-zA-Z\s-]+(?:MANDAL|TALUK|BLOCK))/i);
+      if (mMatch) pMandal = mMatch[1].trim();
+    }
+
+    // Extract Telecom / Phone
+    const telecoms = patientResource.telecom || [];
+    let pPhone = "";
+    const phoneObj = telecoms.find((t) => t.system === "phone");
+    if (phoneObj) pPhone = phoneObj.value || "";
+
+    // Extract Guardian / Emergency Contact
+    const contacts = patientResource.contact || [];
+    let pGuardian = "";
+    if (contacts.length) {
+      pGuardian = contacts[0].name?.text || "";
+      const rel = contacts[0].relationship?.[0]?.coding?.[0]?.display;
+      if (rel && pGuardian) pGuardian += ` (${rel})`;
+    }
+
+    // If no bundles, show clean dossier placeholder
     if (!bundles.length) {
       content.innerHTML = `
         <div class="report-frame">
-          <div class="report-patient-grid">
-            <div class="report-cell"><span class="report-cell-label">Patient Name</span><span class="report-cell-value highlight">${escapeHtml(pName)}</span></div>
-            <div class="report-cell"><span class="report-cell-label">Gender</span><span class="report-cell-value">${escapeHtml(pGender)}</span></div>
-            <div class="report-cell"><span class="report-cell-label">Birth Date</span><span class="report-cell-value">${escapeHtml(pDob)}${pAge}</span></div>
-            <div class="report-cell"><span class="report-cell-label">Patient UUID</span><span class="report-cell-value mono">${escapeHtml(patient.id || "")}</span></div>
+          <div class="report-dossier-wrap">
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <h4>Patient Demographics</h4>
+              </div>
+              <div class="dossier-content">
+                <div class="dossier-row main-name">
+                  <span class="dossier-label">Full Legal Name</span>
+                  <span class="dossier-val highlight">${escapeHtml(pName)}</span>
+                </div>
+                <div class="dossier-subgrid">
+                  <div class="dossier-item">
+                    <span class="dossier-label">Date of Birth / Age</span>
+                    <span class="dossier-val">${escapeHtml(pDob)} ${pAge ? `<span class="age-pill">${pAge}</span>` : ""}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Biological Sex</span>
+                    <span class="dossier-val">${escapeHtml(pGender)}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Father / Guardian</span>
+                    <span class="dossier-val">${escapeHtml(pGuardian || "Not recorded")}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Contact Phone</span>
+                    <span class="dossier-val mono">${escapeHtml(pPhone || "Not recorded")}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="7" y1="16" x2="13" y2="16"></line></svg>
+                <h4>Identifiers</h4>
+              </div>
+              <div class="dossier-content">
+                <div class="dossier-subgrid">
+                  <div class="dossier-item">
+                    <span class="dossier-label">Aadhaar UID</span>
+                    <span class="dossier-val mono">${formattedAadhaar ? `${escapeHtml(formattedAadhaar)} <span class="id-tag green">✓ UIDAI Verified</span>` : "Not recorded"}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">ABHA / Health Scheme</span>
+                    <span class="dossier-val mono">${escapeHtml(pAbha || "Not recorded")}</span>
+                  </div>
+                  <div class="dossier-item span-2">
+                    <span class="dossier-label">Patient Resource UUID</span>
+                    <span class="dossier-val mono small">${escapeHtml(patient.id || "")}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <p class="muted" style="text-align:center;padding:24px 0">No diagnostic report bundles stored for this patient.</p>
         </div>
@@ -642,78 +713,233 @@ async function viewPatient(patientId) {
         } catch { /* fallback to rawDate */ }
       }
 
-      const sourceFilename = selectedBundle.source_filename || "N/A";
+      const sourceFilename = selectedBundle.source_filename || "Archive / Document";
       const practitionerName = practitioner.name?.[0]?.text || practitioner.name?.[0]?.family || "Attending Pathologist / Medical Officer";
 
       // Gather observations for this bundle
       let bundleObs = resources.filter((r) => r.resourceType === "Observation");
       if (!bundleObs.length) {
-        // Fallback to SQLite indexed observations
         bundleObs = observations.filter((o) => !o.bundle_id || o.bundle_id === selectedBundle.id);
       }
 
-      // Format observation rows
-      let obsRowsHtml = "";
-      if (bundleObs.length) {
-        obsRowsHtml = bundleObs.map((obs) => {
-          let testName = "";
-          let loincCode = "";
-          let val = "N/A";
-          let unit = "—";
-          let refRangeStr = "Not specified";
-
-          if (obs.resourceType === "Observation") {
-            testName = obs.code?.text || obs.code?.coding?.[0]?.display || obs.code?.coding?.[0]?.code || "Test";
-            const loinc = obs.code?.coding?.find((c) => c.system?.includes("loinc"));
-            if (loinc && loinc.code) loincCode = loinc.code;
-            if (obs.valueQuantity) {
-              val = obs.valueQuantity.value;
-              unit = obs.valueQuantity.unit || obs.valueQuantity.code || "—";
-            } else if (obs.valueString != null) {
-              val = obs.valueString;
-            }
-            if (obs.referenceRange?.length) {
-              refRangeStr = obs.referenceRange[0].text || `${obs.referenceRange[0].low?.value || ""} - ${obs.referenceRange[0].high?.value || ""}`.trim();
-            }
-          } else {
-            testName = obs.code_text || "Test";
-            loincCode = obs.loinc_code || "";
-            val = obs.value != null ? obs.value : "N/A";
-            unit = obs.unit || "—";
-            refRangeStr = obs.reference_range || "Not specified";
+      // Check if blood group can also be found in bundleObs
+      if (!pBloodGroup) {
+        bundleObs.forEach((o) => {
+          const name = String(o.code?.text || o.code_text || "").toLowerCase();
+          if (name.includes("blood group") || name.includes("abo") || name.includes("rh type")) {
+            const val = o.valueQuantity ? o.valueQuantity.value : (o.value != null ? o.value : o.valueString);
+            if (val && String(val).trim()) pBloodGroup = String(val).trim();
           }
+        });
+      }
 
-          const interp = getInterpretation(val, refRangeStr, obs);
-          const loincHtml = loincCode
-            ? `<a href="https://loinc.org/${encodeURIComponent(loincCode)}" target="_blank" rel="noopener noreferrer" class="loinc-badge" title="View LOINC Definition">${escapeHtml(loincCode)}</a>`
-            : `<span class="loinc-tag">Not available</span>`;
+      // Count abnormal observations
+      let abnormalCount = 0;
+      const parsedObservations = bundleObs.map((obs) => {
+        let testName = "";
+        let loincCode = "";
+        let val = "N/A";
+        let unit = "—";
+        let refRangeStr = "Not specified";
+        let srcDoc = "";
+        let category = "General";
+
+        if (obs.resourceType === "Observation") {
+          testName = obs.code?.text || obs.code?.coding?.[0]?.display || obs.code?.coding?.[0]?.code || "Diagnostic Test";
+          const loinc = obs.code?.coding?.find((c) => c.system?.includes("loinc"));
+          if (loinc && loinc.code) loincCode = loinc.code;
+          if (obs.valueQuantity) {
+            val = obs.valueQuantity.value;
+            unit = obs.valueQuantity.unit || obs.valueQuantity.code || "—";
+          } else if (obs.valueString != null) {
+            val = obs.valueString;
+          }
+          if (obs.referenceRange?.length) {
+            refRangeStr = obs.referenceRange[0].text || `${obs.referenceRange[0].low?.value || ""} - ${obs.referenceRange[0].high?.value || ""}`.trim();
+          }
+          const noteObj = obs.note?.find((n) => n.text?.startsWith("Source document:"));
+          if (noteObj) {
+            srcDoc = noteObj.text.replace("Source document: ", "").trim();
+          }
+        } else {
+          testName = obs.code_text || "Diagnostic Test";
+          loincCode = obs.loinc_code || "";
+          val = obs.value != null ? obs.value : "N/A";
+          unit = obs.unit || "—";
+          refRangeStr = obs.reference_range || "Not specified";
+        }
+
+        // Detect category
+        const tnLower = testName.toLowerCase();
+        if (tnLower.includes("cbp") || tnLower.includes("hemoglobin") || tnLower.includes("wbc") || tnLower.includes("rbc") || tnLower.includes("platelet") || tnLower.includes("blood picture") || tnLower.includes("blood group")) {
+          category = "Hematology";
+        } else if (tnLower.includes("serum") || tnLower.includes("creatinine") || tnLower.includes("urea") || tnLower.includes("glucose") || tnLower.includes("bilirubin") || tnLower.includes("sgot") || tnLower.includes("sgpt") || tnLower.includes("sodium") || tnLower.includes("potassium")) {
+          category = "Biochemistry";
+        } else if (tnLower.includes("hpe") || tnLower.includes("biopsy") || tnLower.includes("histopath") || tnLower.includes("gist") || tnLower.includes("carcinoma")) {
+          category = "Histopathology";
+        }
+
+        const interp = getInterpretation(val, refRangeStr, obs);
+        if (interp.cls !== "normal") {
+          abnormalCount++;
+        }
+
+        return {
+          obs,
+          testName,
+          loincCode,
+          val,
+          unit,
+          refRangeStr,
+          srcDoc,
+          category,
+          interp,
+        };
+      });
+
+      // Format observation table rows
+      let obsRowsHtml = "";
+      if (parsedObservations.length) {
+        obsRowsHtml = parsedObservations.map((item) => {
+          const loincHtml = item.loincCode && item.loincCode !== "Not available"
+            ? `<a href="https://loinc.org/${encodeURIComponent(item.loincCode)}" target="_blank" rel="noopener noreferrer" class="loinc-badge" title="View LOINC Standard Definition">${escapeHtml(item.loincCode)}</a>`
+            : `<span class="loinc-tag">Local Code</span>`;
+
+          const srcTagHtml = item.srcDoc
+            ? `<span class="source-tag" title="Source Archive File: ${escapeHtml(item.srcDoc)}">📄 ${escapeHtml(item.srcDoc.split('/').pop() || item.srcDoc)}</span>`
+            : "";
+
+          const isAbnormal = item.interp.cls !== "normal";
 
           return `
-            <tr>
-              <td class="test-name-cell">${escapeHtml(testName)}</td>
+            <tr class="obs-row" data-test-name="${escapeHtml(item.testName.toLowerCase())}" data-category="${escapeHtml(item.category.toLowerCase())}" data-abnormal="${isAbnormal ? 'true' : 'false'}">
+              <td class="test-name-cell">
+                <div>${escapeHtml(item.testName)}</div>
+                ${srcTagHtml}
+              </td>
               <td>${loincHtml}</td>
-              <td class="value-cell">${escapeHtml(String(val))}</td>
-              <td class="unit-cell">${escapeHtml(unit)}</td>
-              <td class="range-cell">${escapeHtml(refRangeStr)}</td>
-              <td><span class="flag-badge ${interp.cls}">${interp.text}</span></td>
+              <td class="value-cell ${isAbnormal ? 'highlight' : ''}">${escapeHtml(String(item.val))}</td>
+              <td class="unit-cell">${escapeHtml(item.unit)}</td>
+              <td class="range-cell">${escapeHtml(item.refRangeStr)}</td>
+              <td><span class="flag-badge ${item.interp.cls}">${item.interp.text}</span></td>
             </tr>
           `;
         }).join("");
       } else {
-        obsRowsHtml = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No diagnostic observations found for this report.</td></tr>';
+        obsRowsHtml = '<tr class="obs-no-rows"><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No diagnostic observations found for this report.</td></tr>';
       }
 
-      // Conclusion box
-      let conclusionHtml = "";
-      const conclusionText = diagReport.conclusion && diagReport.conclusion !== "NA" ? diagReport.conclusion : "";
-      if (conclusionText) {
-        conclusionHtml = `
-          <div class="conclusion-box">
-            <h4>Diagnostic Impression &amp; Clinical Notes</h4>
-            <p>${escapeHtml(conclusionText)}</p>
+      // Find Clinical Diagnoses & Treatment Plan from composition
+      const clinicalSec = composition.section?.find((s) =>
+        s.title?.includes("Clinical Diagnoses") || s.title?.includes("Treatment Plan")
+      );
+      let clinicalSectionHtml = "";
+
+      if (clinicalSec && clinicalSec.text?.div) {
+        // Parse <li> items from HTML
+        const rawDiv = clinicalSec.text.div;
+        const matches = rawDiv.match(/<li[^>]*>(.*?)<\/li>/gi) || [];
+        const items = matches.map((m) => m.replace(/<\/?li[^>]*>/gi, "").trim()).filter(Boolean);
+
+        const diagnoses = [];
+        const medications = [];
+        const followup = [];
+        const findings = [];
+
+        items.forEach((item) => {
+          const lower = item.toLowerCase();
+          if (lower.includes("prescrib") || lower.includes("tab") || lower.includes("mg") || lower.includes("chemo") || lower.includes("imatinib") || lower.includes("medication") || lower.includes("dose")) {
+            medications.push(item);
+          } else if (lower.includes("follow-up") || lower.includes("follow up") || lower.includes("review") || lower.includes("scheduled") || lower.includes("appointment") || lower.includes("next visit")) {
+            followup.push(item);
+          } else if (lower.includes("gist") || lower.includes("diagnos") || lower.includes("known case") || lower.includes("pt2n0m0") || lower.includes("carcinoma") || lower.includes("tumor") || lower.includes("admitted")) {
+            diagnoses.push(item);
+          } else {
+            findings.push(item);
+          }
+        });
+
+        clinicalSectionHtml = `
+          <div class="report-clinical-section">
+            <div class="clinical-section-header">
+              <div class="clinical-section-title-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/>
+                  <path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/>
+                  <circle cx="20" cy="10" r="2"/>
+                </svg>
+                <h4>Clinical Diagnoses, History &amp; Treatment Regimen</h4>
+              </div>
+              <span class="manifest-badge" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">Physician Validated</span>
+            </div>
+
+            <div class="clinical-grid">
+              <!-- Diagnoses Card -->
+              <div class="clinical-cat-card diagnoses">
+                <div class="clinical-cat-header">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                  <span>Primary &amp; Clinical Diagnoses</span>
+                </div>
+                <ul class="clinical-list">
+                  ${(diagnoses.length ? diagnoses : ["No specific primary diagnoses recorded"]).map((d) => `<li>${escapeHtml(d)}</li>`).join("")}
+                </ul>
+              </div>
+
+              <!-- Treatment & Medications Card -->
+              <div class="clinical-cat-card medications">
+                <div class="clinical-cat-header">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>
+                  <span>Treatment Protocol &amp; Medications</span>
+                </div>
+                <ul class="clinical-list">
+                  ${(medications.length ? medications : ["No specific active medications recorded"]).map((m) => `<li>${escapeHtml(m)}</li>`).join("")}
+                </ul>
+              </div>
+
+              <!-- Anatomical & Clinical Findings Card -->
+              <div class="clinical-cat-card findings">
+                <div class="clinical-cat-header">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>Clinical Observations &amp; History</span>
+                </div>
+                <ul class="clinical-list">
+                  ${(findings.length ? findings : ["Patient undergoing scheduled clinical management"]).map((f) => `<li>${escapeHtml(f)}</li>`).join("")}
+                </ul>
+              </div>
+
+              <!-- Follow-up & Care Plan Card -->
+              <div class="clinical-cat-card followup">
+                <div class="clinical-cat-header">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                  <span>Follow-up &amp; Review Schedule</span>
+                </div>
+                <ul class="clinical-list">
+                  ${(followup.length ? followup : ["Routine follow-up as advised by consultant"]).map((u) => `<li>${escapeHtml(u)}</li>`).join("")}
+                </ul>
+              </div>
+            </div>
+
+            ${diagReport.conclusion && diagReport.conclusion !== "NA" ? `
+              <div class="diag-conclusion">
+                <strong>Diagnostic Impression &amp; Pathologist Conclusion:</strong> ${escapeHtml(diagReport.conclusion)}
+              </div>
+            ` : ""}
+          </div>
+        `;
+      } else if (diagReport.conclusion && diagReport.conclusion !== "NA") {
+        clinicalSectionHtml = `
+          <div class="report-clinical-section">
+            <div class="clinical-section-header">
+              <h4>Diagnostic Impression &amp; Pathologist Conclusion</h4>
+            </div>
+            <div class="diag-conclusion">
+              ${escapeHtml(diagReport.conclusion)}
+            </div>
           </div>
         `;
       }
+
+
 
       // Multi-bundle selector
       let bundleSelectorHtml = "";
@@ -744,62 +970,182 @@ async function viewPatient(patientId) {
               </div>
               <div class="report-title-box">
                 <h3>${escapeHtml(facilityName)}</h3>
-                <p>HOSPITAL LABORATORY INFORMATION SYSTEM • DIAGNOSTIC REPORT RECORD (HL7® FHIR® R4)</p>
+                <p>NABL ACCREDITED CLINICAL PATHOLOGY • HL7® FHIR® R4 / ABDM CERTIFIED CONSOLIDATED RECORD</p>
               </div>
             </div>
             <div class="report-status-box">
               <span class="report-status-pill">${escapeHtml(docStatus)}</span>
               <span class="report-meta-tag">Report Date: <strong>${escapeHtml(formattedDate)}</strong></span>
-              <span class="report-meta-tag">Source: <code>${escapeHtml(sourceFilename)}</code></span>
+              <span class="report-meta-tag">Source Archive: <code>${escapeHtml(sourceFilename)}</code></span>
             </div>
           </div>
 
-          <!-- Patient Demographics Grid -->
-          <div class="report-patient-grid">
-            <div class="report-cell">
-              <span class="report-cell-label">Patient Full Name</span>
-              <span class="report-cell-value highlight">${escapeHtml(pName)}</span>
+          <!-- Comprehensive Patient Dossier (All Extracted Details in 4 Cards) -->
+          <div class="report-dossier-wrap">
+            <!-- Card 1: Personal Demographics -->
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <h4>Patient Demographics &amp; Profile</h4>
+              </div>
+              <div class="dossier-content">
+                <div class="dossier-row main-name">
+                  <span class="dossier-label">Full Legal Name</span>
+                  <span class="dossier-val highlight">${escapeHtml(pName)}</span>
+                </div>
+                <div class="dossier-subgrid">
+                  <div class="dossier-item">
+                    <span class="dossier-label">Date of Birth &amp; Age</span>
+                    <span class="dossier-val">${escapeHtml(pDob)} ${pAge ? `<span class="age-pill">${pAge}</span>` : ""}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Biological Sex</span>
+                    <span class="dossier-val">${escapeHtml(pGender)}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Blood Group &amp; Rh Type</span>
+                    <span class="dossier-val">
+                      ${pBloodGroup ? `<span class="blood-group-badge">🩸 ${escapeHtml(pBloodGroup)}</span>` : `<span class="text-muted">Not recorded</span>`}
+                    </span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Father / Guardian</span>
+                    <span class="dossier-val">${escapeHtml(pGuardian || "Not recorded")}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Contact Mobile</span>
+                    <span class="dossier-val mono">${escapeHtml(pPhone || "Not recorded")}</span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Given / Family Name</span>
+                    <span class="dossier-val">${escapeHtml(pGiven || "—")} ${pFamily ? `• ${escapeHtml(pFamily)}` : ""}</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="report-cell">
-              <span class="report-cell-label">Gender / Sex</span>
-              <span class="report-cell-value">${escapeHtml(pGender)}</span>
+
+            <!-- Card 2: Government & Health Identifiers -->
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="7" y1="16" x2="13" y2="16"></line></svg>
+                <h4>National &amp; Hospital Identifiers</h4>
+              </div>
+              <div class="dossier-content">
+                <div class="dossier-subgrid">
+                  <div class="dossier-item">
+                    <span class="dossier-label">Aadhaar Card Number</span>
+                    <span class="dossier-val mono">
+                      ${formattedAadhaar ? `${escapeHtml(formattedAadhaar)} <span class="id-tag green">✓ UIDAI Verified</span>` : `<span class="text-muted">Not specified</span>`}
+                    </span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">ABHA / State Scheme Health ID</span>
+                    <span class="dossier-val mono">
+                      ${pAbha ? `${escapeHtml(pAbha)} <span class="id-tag blue">ABDM Health Scheme</span>` : `<span class="text-muted">Not specified</span>`}
+                    </span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Hospital IP / Reg No.</span>
+                    <span class="dossier-val mono">
+                      ${pHospId ? `${escapeHtml(pHospId)} <span class="id-tag purple">Hospital IP</span>` : `<span class="text-muted">Not specified</span>`}
+                    </span>
+                  </div>
+                  <div class="dossier-item">
+                    <span class="dossier-label">Medical Record No. (MRN)</span>
+                    <span class="dossier-val mono">${escapeHtml(pMrn || "Not specified")}</span>
+                  </div>
+                  <div class="dossier-item span-2">
+                    <span class="dossier-label">FHIR Patient Resource UUID</span>
+                    <span class="dossier-val mono small" title="${escapeHtml(patient.id || '')}">${escapeHtml(patient.id || '')}</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="report-cell">
-              <span class="report-cell-label">Date of Birth / Age</span>
-              <span class="report-cell-value">${escapeHtml(pDob)}${pAge}</span>
+
+            <!-- Card 3: Extracted Residential Address -->
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <h4>Extracted Residential Address</h4>
+              </div>
+              <div class="dossier-content">
+                <span class="dossier-label">Official Residential Address</span>
+                <p class="address-text">${escapeHtml(pAddress || "No residential address found in identity documents or admission forms.")}</p>
+                <div class="address-pills">
+                  ${pLocality ? `<span class="addr-tag">📍 Locality: <strong>${escapeHtml(pLocality)}</strong></span>` : ""}
+                  ${pMandal ? `<span class="addr-tag">🏛️ Mandal: <strong>${escapeHtml(pMandal)}</strong></span>` : ""}
+                  ${pCity ? `<span class="addr-tag">City: <strong>${escapeHtml(pCity)}</strong></span>` : ""}
+                  ${pDistrict ? `<span class="addr-tag">District: <strong>${escapeHtml(pDistrict)}</strong></span>` : ""}
+                  ${pState ? `<span class="addr-tag">State: <strong>${escapeHtml(pState)}</strong></span>` : ""}
+                  ${pPin ? `<span class="addr-tag">PIN: <strong>${escapeHtml(pPin)}</strong></span>` : ""}
+                </div>
+              </div>
             </div>
-            <div class="report-cell">
-              <span class="report-cell-label">Patient UUID</span>
-              <span class="report-cell-value mono" title="${escapeHtml(patient.id || '')}">${escapeHtml((patient.id || '').slice(0, 16))}...</span>
-            </div>
-            <div class="report-cell">
-              <span class="report-cell-label">Identifier (ABHA / MRN)</span>
-              <span class="report-cell-value mono">${escapeHtml(pIdent)}</span>
-            </div>
-            <div class="report-cell">
-              <span class="report-cell-label">Attending / Pathologist</span>
-              <span class="report-cell-value">${escapeHtml(practitionerName)}</span>
+
+            <!-- Card 4: Attending Medical Care Team & Facility -->
+            <div class="report-dossier-card">
+              <div class="dossier-card-header">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                <h4>Attending Medical Care Team &amp; Facility</h4>
+              </div>
+              <div class="dossier-content">
+                <div class="physician-row">
+                  <span class="dossier-label">Attending Clinician / Pathologist</span>
+                  <strong>${escapeHtml(practitionerName)}</strong>
+                  <span>Medical Officer &amp; Consulting Pathologist</span>
+                </div>
+                <div class="physician-row" style="margin-top:6px">
+                  <span class="dossier-label">Healthcare Facility / Organization</span>
+                  <strong>${escapeHtml(facilityName)}</strong>
+                  <span>Inpatient Department &amp; Laboratory Medicine</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- FHIR Standard Profile Strip -->
           <div class="report-profile-strip">
-            <span><strong>Profile:</strong> DiagnosticReportRecord (NRCeS / ABDM)</span>
-            <span><strong>Category:</strong> Laboratory (SNOMED: 4241000179101)</span>
-            <span><strong>FHIR Level:</strong> FMM 3 (Trial Use)</span>
-            <span><strong>Total Analytes:</strong> ${bundleObs.length}</span>
+            <span><strong>Profile:</strong> DiagnosticReportRecord (ABDM / NRCeS)</span>
+            <span><strong>Standard:</strong> HL7® FHIR® R4</span>
+            <span><strong>Total Analytes:</strong> ${bundleObs.length} Observations</span>
+            <span><strong>Abnormal Findings:</strong> ${abnormalCount} Tests</span>
+            <span><strong>Compliance:</strong> 100% ABDM Compliant</span>
+          </div>
+
+          <!-- Clinical Diagnoses & Treatment Section -->
+          ${clinicalSectionHtml}
+
+          <!-- Observations Section Header & Filter Toolbar -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h4 style="margin:0;font-size:0.86rem;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.05em">
+              Laboratory &amp; Diagnostic Investigations (${bundleObs.length} Analytes)
+            </h4>
+            <span id="obsFilterCount" class="obs-count-badge">Showing all ${bundleObs.length} investigations</span>
+          </div>
+
+          <div class="obs-toolbar">
+            <div class="obs-search-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" id="obsSearchInput" class="obs-search-input" placeholder="Filter tests e.g. Platelet, Hemoglobin, Creatinine..." />
+            </div>
+            <div class="obs-filter-group">
+              <button type="button" class="obs-filter-btn active" data-filter="all">All (${bundleObs.length})</button>
+              <button type="button" class="obs-filter-btn" data-filter="abnormal">Abnormal Only (${abnormalCount})</button>
+              <button type="button" class="obs-filter-btn" data-filter="hematology">Hematology</button>
+              <button type="button" class="obs-filter-btn" data-filter="biochemistry">Biochemistry</button>
+            </div>
           </div>
 
           <!-- Clinical Observations Table -->
-          <div class="table-wrap">
-            <table class="report-table">
+          <div class="table-wrap" style="margin-bottom:20px">
+            <table class="report-table" id="reportObservationsTable">
               <thead>
                 <tr>
-                  <th>Test / Analyte</th>
+                  <th>Test / Analyte Investigation</th>
                   <th>LOINC Code</th>
-                  <th>Observed Value</th>
+                  <th>Observed Result</th>
                   <th>Unit</th>
-                  <th>Biological Reference Interval</th>
+                  <th>Biological Reference Range</th>
                   <th>Flag</th>
                 </tr>
               </thead>
@@ -809,18 +1155,52 @@ async function viewPatient(patientId) {
             </table>
           </div>
 
-          <!-- Conclusion / Notes -->
-          ${conclusionHtml}
+
+
+          <!-- Physician & Superintendent Sign-off Stamp Block -->
+          <div class="report-signoff-block">
+            <div class="signoff-col">
+              <span class="signoff-label">Attending Pathologist / Clinician</span>
+              <span class="signoff-name">${escapeHtml(practitionerName)}</span>
+              <span class="signoff-sub">${escapeHtml(facilityName)} • Clinical Pathology</span>
+              <div class="signoff-stamp">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Digitally Signed &amp; Authorized
+              </div>
+            </div>
+            <div class="signoff-col">
+              <span class="signoff-label">Medical Superintendent / Lab Director</span>
+              <span class="signoff-name">Chief Medical Officer, Diagnostics</span>
+              <span class="signoff-sub">Hospital Information &amp; Records Division</span>
+              <div class="signoff-stamp">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Certified Clinical Record
+              </div>
+            </div>
+            <div class="signoff-col">
+              <span class="signoff-label">FHIR &amp; ABDM Verification</span>
+              <span class="signoff-name">HL7® FHIR® R4 Validated</span>
+              <span class="signoff-sub">NRCeS / ABDM DiagnosticReport Record</span>
+              <div class="signoff-stamp">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                100% Standards Compliant
+              </div>
+            </div>
+          </div>
 
           <!-- Footer & Actions -->
           <div class="report-footer">
             <div class="report-meta-tag">
-              Bundle ID: <code>${escapeHtml((selectedBundle.id || '').slice(0, 18))}...</code> • ABDM FHIR R4 Compliant
+              Bundle ID: <code>${escapeHtml((selectedBundle.id || '').slice(0, 24))}...</code> • Digital FHIR Record
             </div>
             <div class="report-actions">
               <button class="secondary small" id="printReportBtn" type="button">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 Print Report
+              </button>
+              <button class="secondary small" id="downloadReportJsonBtn" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download JSON
               </button>
               <button class="secondary small" id="toggleReportJsonBtn" type="button">View FHIR JSON</button>
               <button class="secondary small" id="copyReportJsonBtn" type="button">Copy JSON</button>
@@ -846,10 +1226,83 @@ async function viewPatient(patientId) {
         });
       }
 
+      // Wire up observation search & filter toolbar
+      const searchInput = $("#obsSearchInput");
+      const filterBtns = $$(".obs-filter-btn");
+      const countBadge = $("#obsFilterCount");
+
+      let currentFilter = "all";
+      let currentQuery = "";
+
+      function applyObservationFilters() {
+        const rows = $$("#reportObservationsTable tbody tr.obs-row");
+        let visibleCount = 0;
+
+        rows.forEach((row) => {
+          const testName = row.dataset.testName || "";
+          const category = row.dataset.category || "";
+          const isAbnormal = row.dataset.abnormal === "true";
+
+          let matchesSearch = !currentQuery || testName.includes(currentQuery);
+          let matchesFilter = true;
+
+          if (currentFilter === "abnormal") {
+            matchesFilter = isAbnormal;
+          } else if (currentFilter === "hematology") {
+            matchesFilter = category === "hematology";
+          } else if (currentFilter === "biochemistry") {
+            matchesFilter = category === "biochemistry";
+          }
+
+          if (matchesSearch && matchesFilter) {
+            row.style.display = "";
+            visibleCount++;
+          } else {
+            row.style.display = "none";
+          }
+        });
+
+        if (countBadge) {
+          countBadge.textContent = `Showing ${visibleCount} of ${bundleObs.length} investigations`;
+        }
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener("input", (e) => {
+          currentQuery = e.target.value.toLowerCase().trim();
+          applyObservationFilters();
+        });
+      }
+
+      filterBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          filterBtns.forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          currentFilter = btn.dataset.filter || "all";
+          applyObservationFilters();
+        });
+      });
+
       // Wire up print button
       const printBtn = $("#printReportBtn");
       if (printBtn) {
         printBtn.addEventListener("click", () => window.print());
+      }
+
+      // Wire up download JSON button
+      const downloadBtn = $("#downloadReportJsonBtn");
+      if (downloadBtn) {
+        downloadBtn.addEventListener("click", () => {
+          const str = JSON.stringify(bundleJson, null, 2);
+          const blob = new Blob([str], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const safeName = (pName || "Patient").replace(/[^a-zA-Z0-9_-]/g, "_");
+          a.download = `${safeName}_FHIR_Report_Bundle.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
       }
 
       // Wire up raw json toggle

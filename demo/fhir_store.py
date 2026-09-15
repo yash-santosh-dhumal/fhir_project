@@ -116,7 +116,13 @@ class FhirStore:
             (name, gender, birth_date),
         ).fetchone()
         if row:
-            return row["id"]
+            patient_id = row["id"]
+            conn.execute(
+                "UPDATE patients SET patient_json=?, name=?, gender=?, birth_date=? WHERE id=?",
+                (json.dumps(patient_resource), name, gender, birth_date, patient_id),
+            )
+            conn.commit()
+            return patient_id
 
         patient_id = patient_resource.get("id") or str(uuid.uuid4())
         conn.execute(
@@ -235,7 +241,13 @@ class FhirStore:
 
     def get_bundle(self, bundle_id: str) -> dict[str, Any] | None:
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM bundles WHERE id=?", (bundle_id,)).fetchone()
+        row = conn.execute(
+            "SELECT b.*, p.name AS patient_name, "
+            "(SELECT COUNT(*) FROM observations o WHERE o.bundle_id = b.id) AS observation_count "
+            "FROM bundles b LEFT JOIN patients p ON p.id = b.patient_id "
+            "WHERE b.id=?",
+            (bundle_id,),
+        ).fetchone()
         return dict(row) if row else None
 
     def get_bundles_for_patient(self, patient_id: str) -> list[dict[str, Any]]:

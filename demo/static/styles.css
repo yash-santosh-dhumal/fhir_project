@@ -362,33 +362,91 @@ tr:hover td { background:rgba(59,130,246,0.04); }
 pre { background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius-sm); padding:16px; overflow-x:auto; max-height:400px; }
 code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
 
-/* ═══ Batch Processing ═══ */
-.batch-file-list {
-  display:flex; flex-direction:column; gap:6px; margin:16px 0;
-  max-height:200px; overflow-y:auto; text-align:left;
+/* ── Archive & Folder Inspection ── */
+.batch-archive-summary {
+  margin: 14px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
 }
-.batch-file-item { font-size:.82rem; color:var(--text-secondary); padding:6px 12px; background:var(--bg-input); border-radius:var(--radius-xs); }
+.archive-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.archive-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.archive-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.archive-header strong {
+  font-size: 0.95rem;
+  color: #fff;
+  display: block;
+}
+.archive-badge-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  margin-top: 4px;
+}
+.archive-tree {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.archive-doc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-input);
+}
+.archive-doc-item:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #fff;
+}
+.badge-subtle {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+.folder-prefix {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+.batch-filepath {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  word-break: break-all;
+}
 
-.progress-bar-container {
-  width:100%; height:12px; background:var(--bg-input); border-radius:6px; overflow:hidden; margin-bottom:12px;
-}
-.progress-bar {
-  height:100%; background:linear-gradient(90deg,var(--accent),var(--success));
-  border-radius:6px; transition:width .5s ease;
-}
-
-.batch-results { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
-.batch-result-item {
-  display:flex; justify-content:space-between; align-items:center;
-  padding:8px 14px; background:var(--bg-input); border-radius:var(--radius-xs); font-size:.82rem;
-}
-.batch-result-item .batch-status {
-  font-size:.7rem; font-weight:700; text-transform:uppercase; padding:2px 10px; border-radius:10px;
-}
-.batch-status.success { background:var(--success-bg); color:var(--success); }
-.batch-status.error { background:var(--error-bg); color:var(--error); }
-.batch-status.processing { background:var(--info-bg); color:var(--info); }
-.batch-status.pending { background:rgba(100,116,139,0.15); color:var(--text-muted); }
 
 /* ═══ Patient Records ═══ */
 .patients-grid {
@@ -704,16 +762,648 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--accent); }
 
-/* ═══ Print Stylesheet for HL7 FHIR Clinical Report ═══ */
+/* ── Enhanced Clinical Report Styles ── */
+.report-dossier-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+@media (max-width: 860px) {
+  .report-dossier-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+.report-dossier-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.report-dossier-card.full-width {
+  grid-column: 1 / -1;
+}
+.dossier-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+  color: var(--accent);
+}
+.dossier-card-header h4 {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: #fff;
+}
+.dossier-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dossier-row.main-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dossier-subgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+@media (max-width: 540px) {
+  .dossier-subgrid {
+    grid-template-columns: 1fr;
+  }
+}
+.dossier-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dossier-item.span-2 {
+  grid-column: 1 / -1;
+}
+.dossier-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.dossier-val {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.dossier-val.highlight {
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+.dossier-val.mono {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+.dossier-val.small {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.id-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.id-tag.green {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.id-tag.blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.id-tag.purple {
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.age-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  margin-left: 4px;
+}
+.blood-group-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin-left: 6px;
+}
+.address-facility-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 768px) {
+  .address-facility-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.address-text {
+  margin: 3px 0 8px;
+  font-size: 0.86rem;
+  color: #e2e8f0;
+  line-height: 1.45;
+}
+.address-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.addr-tag {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+.addr-tag strong {
+  color: #fff;
+}
+.physician-row {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.physician-row strong {
+  color: #fff;
+  font-size: 0.92rem;
+}
+.physician-row span {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ── Categorized Clinical Diagnoses & Treatment Plan Grid ── */
+.report-clinical-section {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+.clinical-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 10px;
+}
+.clinical-section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+}
+.clinical-section-title-wrap h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.clinical-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+.clinical-cat-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-xs);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clinical-cat-card.diagnoses {
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.03);
+}
+.clinical-cat-card.medications {
+  border-left: 3px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.03);
+}
+.clinical-cat-card.findings {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.03);
+}
+.clinical-cat-card.followup {
+  border-left: 3px solid #10b981;
+  background: rgba(16, 185, 129, 0.03);
+}
+.clinical-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+.clinical-cat-card.diagnoses .clinical-cat-header { color: #fca5a5; }
+.clinical-cat-card.medications .clinical-cat-header { color: #93c5fd; }
+.clinical-cat-card.findings .clinical-cat-header { color: #fde68a; }
+.clinical-cat-card.followup .clinical-cat-header { color: #a7f3d0; }
+
+.clinical-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.clinical-list li {
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.clinical-list li::before {
+  content: "•";
+  color: var(--text-muted);
+  font-weight: bold;
+}
+.diag-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  margin: 2px 4px 2px 0;
+}
+.med-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  margin: 2px 4px 2px 0;
+}
+.diag-conclusion {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--border);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── Observation Filter Toolbar & Search ── */
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+.obs-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 380px;
+}
+.obs-search-wrap svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.obs-search-input {
+  width: 100%;
+  padding: 6px 10px 6px 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.obs-search-input:focus {
+  border-color: var(--accent);
+}
+.obs-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.obs-filter-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.obs-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.obs-filter-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.obs-count-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+
+/* ── Observation Flags ── */
+.flag-badge.critical {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid #ef4444;
+  font-weight: 700;
+}
+.flag-badge.abnormal {
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.flag-badge.reactive {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fdba74;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+/* ── Archive Documents Provenance Manifest Grid ── */
+.report-manifest-section {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+.manifest-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.manifest-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.manifest-header h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.manifest-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+.manifest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.manifest-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-xs);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.manifest-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.manifest-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.manifest-card-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+}
+.manifest-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.manifest-card-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  word-break: break-all;
+  line-height: 1.3;
+}
+.manifest-type-pill {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.manifest-type-pill.dtype-id {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.manifest-type-pill.dtype-lab {
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.manifest-type-pill.dtype-discharge {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.manifest-type-pill.dtype-photo {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.manifest-type-pill.dtype-prescription {
+  background: rgba(99, 102, 241, 0.15);
+  color: #c7d2fe;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+.manifest-type-pill.dtype-bill {
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.manifest-card-summary {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.manifest-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.manifest-status-tag {
+  color: var(--success);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ── Physician & Superintendent Official Sign-off Stamp Block ── */
+.report-signoff-block {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+@media (max-width: 720px) {
+  .report-signoff-block {
+    grid-template-columns: 1fr;
+  }
+}
+.signoff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signoff-col .signoff-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.signoff-col .signoff-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #fff;
+}
+.signoff-col .signoff-sub {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.signoff-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px dashed rgba(16, 185, 129, 0.35);
+  border-radius: 4px;
+  color: var(--success);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* ── Rich Patient List View Cards in Tab ── */
+.pc-badge.verified {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.pc-badge.abha {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.pc-badge.loc {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.pc-badge.diag {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ═══ Print Stylesheet for High-End Hospital Medical Report ═══ */
 @media print {
   body {
     background: #ffffff !important;
     color: #0f172a !important;
+    font-size: 11pt !important;
   }
   .hero, .flow, .disclaimer, .tab-nav, .upload-section, .stepper-card,
   #validationSection, #summaryGrid, .raw-card, #tab-batch, #tab-explorer,
   #patientsList, .section-header, .report-footer .report-actions,
-  #reportBundleSelect, #toggleReportJsonBtn, #copyReportJsonBtn, #reportRawJsonWrap {
+  #reportBundleSelect, #toggleReportJsonBtn, #copyReportJsonBtn, #reportRawJsonWrap,
+  .obs-toolbar, .pc-delete-btn, #downloadReportJsonBtn, #deleteCurrentReportBtn {
     display: none !important;
   }
   .patient-report-card {
@@ -721,43 +1411,168 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    box-shadow: none !important;
   }
   .report-frame {
     background: #ffffff !important;
-    border: 1px solid #cbd5e1 !important;
+    border: 2px solid #0f172a !important;
     box-shadow: none !important;
-    padding: 20px !important;
+    padding: 24px !important;
+    color: #0f172a !important;
+    page-break-after: auto;
+  }
+  .report-top-bar {
+    border-bottom: 2px solid #0f172a !important;
+    padding-bottom: 14px !important;
+    margin-bottom: 16px !important;
     color: #0f172a !important;
   }
-  .report-top-bar, .report-profile-strip, .report-table th, .report-table td {
-    border-color: #e2e8f0 !important;
+  .report-branding .report-title-box h3 {
+    color: #0f172a !important;
+    font-size: 16pt !important;
+    font-weight: 800 !important;
+  }
+  .report-branding .report-title-box p {
+    color: #475569 !important;
+    font-size: 8pt !important;
+  }
+  .report-status-pill {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #94a3b8 !important;
+  }
+  .report-meta-tag {
+    color: #334155 !important;
+  }
+  .report-dossier-wrap {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 12px !important;
+    margin-bottom: 16px !important;
+    page-break-inside: avoid;
+  }
+  .report-dossier-card {
+    background: #ffffff !important;
+    border: 1px solid #94a3b8 !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+  .dossier-card-header {
+    border-bottom: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
   }
-  .report-branding .report-title-box h3,
-  .report-cell-value.highlight,
-  .test-name-cell,
-  .value-cell {
+  .dossier-card-header h4 {
     color: #0f172a !important;
+    font-size: 9pt !important;
   }
-  .report-patient-grid {
+  .dossier-label {
+    color: #64748b !important;
+    font-size: 7.5pt !important;
+  }
+  .dossier-val {
+    color: #0f172a !important;
+    font-size: 9.5pt !important;
+  }
+  .dossier-val.highlight {
+    color: #0f172a !important;
+    font-size: 13pt !important;
+  }
+  .id-tag.green, .id-tag.blue, .id-tag.purple {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #94a3b8 !important;
+  }
+  .blood-group-badge {
+    background: #fef2f2 !important;
+    color: #b91c1c !important;
+    border: 1px solid #f87171 !important;
+  }
+  .addr-tag {
     background: #f8fafc !important;
-    border: 1px solid #e2e8f0 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #334155 !important;
+  }
+  .addr-tag strong {
+    color: #0f172a !important;
+  }
+  .address-text {
+    color: #0f172a !important;
+  }
+  .physician-row strong {
+    color: #0f172a !important;
+  }
+  .report-profile-strip {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    margin-bottom: 16px !important;
+    page-break-inside: avoid;
+  }
+  .report-clinical-section {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    margin-bottom: 16px !important;
+    page-break-inside: avoid;
+  }
+  .clinical-section-title-wrap h4 {
+    color: #0f172a !important;
+  }
+  .clinical-cat-card {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+  .clinical-list li {
+    color: #0f172a !important;
+  }
+  .diag-pill {
+    background: #fef2f2 !important;
+    color: #991b1b !important;
+    border: 1px solid #fca5a5 !important;
+  }
+  .med-pill {
+    background: #eff6ff !important;
+    color: #1e40af !important;
+    border: 1px solid #bfdbfe !important;
+  }
+  .report-table {
+    border: 1px solid #cbd5e1 !important;
+    width: 100% !important;
+    page-break-inside: auto;
   }
   .report-table th {
     background: #f1f5f9 !important;
-    color: #475569 !important;
+    color: #0f172a !important;
+    border-bottom: 2px solid #94a3b8 !important;
+    font-size: 8.5pt !important;
   }
-  .report-profile-strip {
-    background: #f0fdf4 !important;
-    border-color: #bbf7d0 !important;
-    color: #166534 !important;
+  .report-table td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    color: #0f172a !important;
+    font-size: 8.5pt !important;
+  }
+  .report-table tr {
+    page-break-inside: avoid;
+  }
+  .test-name-cell div {
+    color: #0f172a !important;
+    font-weight: 700 !important;
+  }
+  .value-cell {
+    color: #0f172a !important;
+    font-weight: 800 !important;
+  }
+  .loinc-badge {
+    background: #f8fafc !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
   }
   .flag-badge.normal {
     background: #ecfdf5 !important;
     color: #065f46 !important;
     border: 1px solid #10b981 !important;
   }
-  .flag-badge.high {
+  .flag-badge.high, .flag-badge.critical {
     background: #fef2f2 !important;
     color: #991b1b !important;
     border: 1px solid #ef4444 !important;
@@ -767,11 +1582,41 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
     color: #155e75 !important;
     border: 1px solid #06b6d4 !important;
   }
-  .loinc-badge {
-    background: #f1f5f9 !important;
-    color: #1e40af !important;
+  .report-manifest-section {
+    background: #ffffff !important;
     border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    page-break-inside: avoid;
+  }
+  .manifest-grid {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .manifest-card {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+  .manifest-card-name {
+    color: #0f172a !important;
+  }
+  .manifest-card-summary {
+    color: #475569 !important;
+  }
+  .report-signoff-block {
+    background: #ffffff !important;
+    border: 1px solid #94a3b8 !important;
+    color: #0f172a !important;
+    page-break-inside: avoid;
+  }
+  .signoff-col .signoff-name {
+    color: #0f172a !important;
+  }
+  .signoff-stamp {
+    background: #ecfdf5 !important;
+    color: #065f46 !important;
+    border: 1px dashed #10b981 !important;
   }
 }
+
 
 

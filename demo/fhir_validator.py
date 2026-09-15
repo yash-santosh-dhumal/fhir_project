@@ -46,6 +46,7 @@ VALID_SYSTEMS = {
     "http://terminology.hl7.org/CodeSystem/v3-ActCode",
     "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
     "http://terminology.hl7.org/CodeSystem/observation-category",
+    "http://terminology.hl7.org/CodeSystem/v2-0074",
     "http://hospital.smarthealthit.org",
     "https://healthid.ndhm.gov.in",
     "https://doctor.ndhm.gov.in",
