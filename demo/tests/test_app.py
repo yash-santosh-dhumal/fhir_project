@@ -244,9 +244,10 @@ class TestAppEndpoints(unittest.TestCase):
         self.assertIn("Patient", resources)
         self.assertIn("Observation", resources)
 
-        # Unified summary
+        # Unified summary — at least the 2 toolkit observations are present,
+        # plus any additional Gemini-extracted observations from the archive
         obs_summary = data.get("summary", {}).get("observations", [])
-        self.assertEqual(len(obs_summary), 2)
+        self.assertGreaterEqual(len(obs_summary), 2)
         obs_names = [o.get("test") for o in obs_summary]
         self.assertIn("Hemoglobin", obs_names)
         self.assertIn("Glucose", obs_names)

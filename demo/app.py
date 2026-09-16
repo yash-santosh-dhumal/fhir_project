@@ -73,6 +73,7 @@ SUPPORTED_MIME_TYPES = {
 
 app = Flask(__name__)
 fhir_store = FhirStore()
+insurance_store = FhirStore(db_path=_DEMO_DIR / "insurance_data.db")
 log = logging.getLogger(__name__)
 
 
@@ -132,8 +133,8 @@ def _optimize_image_if_needed(file_bytes: bytes, mime_type: str) -> tuple[bytes,
   return file_bytes, mime_type
 
 
-@app.post("/api/convert")
-def convert():
+def _do_convert(store: FhirStore):
+  """Shared conversion logic used by both hospital and insurance portals."""
   uploaded = request.files.get("file")
   if uploaded is None or uploaded.filename == "":
     return _error("No file was uploaded.", 400)
@@ -225,7 +226,7 @@ def convert():
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
 
     # Store master bundle in SQLite under the unified patient
-    bid = fhir_store.store_bundle(
+    bid = store.store_bundle(
         master_bundle,
         source_filename=f"{uploaded.filename} ({analysis.document_count} documents unified)",
         document_type="CLINICAL_RECORD",
@@ -304,7 +305,7 @@ def convert():
           source_filenames=[uploaded.filename or "document"],
           gemini_extraction=gemini_extraction,
       )
-      bid = fhir_store.store_bundle(
+      bid = store.store_bundle(
           master_bundle,
           source_filename=uploaded.filename or "document",
           document_type="CLINICAL_RECORD",
@@ -346,7 +347,7 @@ def convert():
   for fb in bundles_from_payload:
     src_name = uploaded.filename if uploaded else ""
     doc_type = standardized_docs[0].get("document_type", "") if standardized_docs else ""
-    bid = fhir_store.store_bundle(fb, source_filename=src_name, document_type=doc_type)
+    bid = store.store_bundle(fb, source_filename=src_name, document_type=doc_type)
     stored_bundle_ids.append(bid)
 
   # Run validation
@@ -359,6 +360,11 @@ def convert():
       "validation": validation,
       "stored_bundle_ids": stored_bundle_ids,
   })
+
+
+@app.post("/api/convert")
+def convert():
+  return _do_convert(fhir_store)
 
 
 # ── Patient records ──
@@ -428,6 +434,77 @@ def validate():
 @app.get("/api/stats")
 def stats():
     return jsonify(fhir_store.get_stats())
+
+
+# ══════════════════════════════════════════════════════════════
+# Insurance Claim Company Portal — Parallel API Routes
+# Uses the same processing pipeline but stores data in a
+# separate SQLite database (insurance_data.db).
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/api/insurance/convert")
+def insurance_convert():
+    return _do_convert(insurance_store)
+
+
+@app.get("/api/insurance/patients")
+def insurance_list_patients():
+    return jsonify(insurance_store.get_all_patients())
+
+
+@app.get("/api/insurance/patients/<patient_id>")
+def insurance_get_patient(patient_id: str):
+    patient = insurance_store.get_patient(patient_id)
+    if not patient:
+        return _error("Patient not found.", 404)
+    bundles = insurance_store.get_bundles_for_patient(patient_id)
+    observations = insurance_store.get_observations_for_patient(patient_id)
+    return jsonify({"patient": patient, "bundles": bundles, "observations": observations})
+
+
+@app.delete("/api/insurance/patients/<patient_id>")
+def insurance_delete_patient(patient_id: str):
+    success = insurance_store.delete_patient(patient_id)
+    if not success:
+        return _error("Patient not found.", 404)
+    return jsonify({"success": True, "message": "Patient record deleted successfully."})
+
+
+@app.get("/api/insurance/bundles")
+def insurance_list_bundles():
+    return jsonify(insurance_store.get_all_bundles())
+
+
+@app.get("/api/insurance/bundles/<bundle_id>")
+def insurance_get_bundle(bundle_id: str):
+    bundle = insurance_store.get_bundle(bundle_id)
+    if not bundle:
+        return _error("Bundle not found.", 404)
+    bundle_json = json.loads(bundle["bundle_json"]) if bundle.get("bundle_json") else {}
+    validation = validate_bundle(bundle_json)
+    return jsonify({"bundle": bundle, "validation": validation})
+
+
+@app.delete("/api/insurance/bundles/<bundle_id>")
+def insurance_delete_bundle(bundle_id: str):
+    success = insurance_store.delete_bundle(bundle_id)
+    if not success:
+        return _error("Bundle not found.", 404)
+    return jsonify({"success": True, "message": "Report bundle deleted successfully."})
+
+
+@app.post("/api/insurance/validate")
+def insurance_validate():
+    data = request.get_json(silent=True)
+    if not data:
+        return _error("No JSON body provided.", 400)
+    result = validate_bundle(data)
+    return jsonify(result)
+
+
+@app.get("/api/insurance/stats")
+def insurance_stats():
+    return jsonify(insurance_store.get_stats())
 
 
 def _error(

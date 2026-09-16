@@ -10,11 +10,23 @@
   </head>
   <body>
     <main class="page">
+      <!-- Portal Switcher -->
+      <div class="portal-switcher" id="portalSwitcher">
+        <button class="portal-btn active" id="portalBtnHospital" data-portal="hospital">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M9 8h1"/><path d="M9 12h1"/><path d="M9 16h1"/><path d="M14 8h1"/><path d="M14 12h1"/><path d="M14 16h1"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg>
+          Hospital Portal
+        </button>
+        <button class="portal-btn" id="portalBtnInsurance" data-portal="insurance">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
+          Insurance Portal
+        </button>
+      </div>
+
       <header class="hero">
         <div>
-          <p class="eyebrow">Google Health Medical Data Toolkit</p>
-          <h1>FHIR Dashboard</h1>
-          <p class="subtitle">Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.</p>
+          <p class="eyebrow" id="heroEyebrow">Google Health Medical Data Toolkit</p>
+          <h1 id="heroTitle">FHIR Dashboard</h1>
+          <p class="subtitle" id="heroSubtitle">Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.</p>
         </div>
         <div class="hero-right">
           <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
@@ -32,10 +44,11 @@
 
       <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
 
+
       <!-- Tab navigation -->
       <nav class="tab-nav" id="tabNav">
         <button class="tab-btn active" data-tab="upload">Upload &amp; Convert</button>
-        <button class="tab-btn" data-tab="patients">Patient Records</button>
+        <button class="tab-btn" data-tab="patients" id="tabBtnPatients">Patient Records</button>
         <button class="tab-btn" data-tab="explorer">FHIR Explorer</button>
       </nav>
 
@@ -43,8 +56,8 @@
       <div class="tab-panel active" id="tab-upload">
         <section class="upload-section">
           <article class="card upload-card" id="dropZone">
-            <h2>Upload Patient Document or ZIP Archive</h2>
-            <p class="muted">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
+            <h2 id="uploadCardTitle">Upload Patient Document or ZIP Archive</h2>
+            <p class="muted" id="uploadCardDesc">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
             <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png,image/webp,image/bmp,image/tiff,.zip,application/zip,application/x-zip-compressed" hidden>
             <div class="upload-btn-group">
               <button id="browseButton" class="primary" type="button">Browse File</button>
@@ -131,7 +144,7 @@
           </article>
 
           <article class="card">
-            <h2>Extracted Clinical Data</h2>
+            <h2 id="extractedDataTitle">Extracted Clinical Data</h2>
             <div class="patient">
               <div><strong>Patient</strong><span id="patientName">Not available</span></div>
               <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
@@ -175,7 +188,7 @@
       <div class="tab-panel" id="tab-patients">
         <section class="card">
           <div class="section-header">
-            <h2>Patient Records</h2>
+            <h2 id="patientsSectionTitle">Patient Records</h2>
             <button id="refreshPatientsBtn" class="secondary small" type="button">Refresh</button>
           </div>
           <div id="patientsList" class="patients-grid">

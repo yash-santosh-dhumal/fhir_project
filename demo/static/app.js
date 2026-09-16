@@ -25,11 +25,30 @@ const dbStats     = $("#dbStats");
 
 let selectedFile = null;
 
+// ── Portal Mode ──
+let portalMode = "hospital"; // "hospital" or "insurance"
+function apiBase() {
+  return portalMode === "insurance" ? "/api/insurance" : "/api";
+}
+
 // ═══════════════════════════════════════════════
 // Tab Navigation
 // ═══════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Portal switcher
+  const portalBtns = $$("[data-portal]");
+  portalBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const newMode = btn.dataset.portal;
+      if (newMode === portalMode) return;
+      portalMode = newMode;
+      portalBtns.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      switchPortal(newMode);
+    });
+  });
+
   // Tab switching
   $$(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -88,12 +107,92 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 // ═══════════════════════════════════════════════
+// Portal Switching
+// ═══════════════════════════════════════════════
+
+function switchPortal(mode) {
+  const body = document.body;
+  if (mode === "insurance") {
+    body.classList.add("portal-insurance");
+  } else {
+    body.classList.remove("portal-insurance");
+  }
+
+  // Update header branding
+  const eyebrow = $("#heroEyebrow");
+  const title = $("#heroTitle");
+  const subtitle = $("#heroSubtitle");
+  if (mode === "insurance") {
+    if (eyebrow) eyebrow.textContent = "Insurance Claim Company Portal";
+    if (title) title.textContent = "Insurance FHIR Dashboard";
+    if (subtitle) subtitle.textContent = "Extract, validate, and store ABDM FHIR R4 data from insurance claim documents.";
+  } else {
+    if (eyebrow) eyebrow.textContent = "Google Health Medical Data Toolkit";
+    if (title) title.textContent = "FHIR Dashboard";
+    if (subtitle) subtitle.textContent = "Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.";
+  }
+
+  // Update tab labels
+  const tabPatients = $("#tabBtnPatients");
+  if (tabPatients) tabPatients.textContent = mode === "insurance" ? "Claims Reports" : "Patient Records";
+
+  // Update upload card text
+  const uploadTitle = $("#uploadCardTitle");
+  const uploadDesc = $("#uploadCardDesc");
+  if (mode === "insurance") {
+    if (uploadTitle) uploadTitle.textContent = "Upload Claim Document or ZIP Archive";
+    if (uploadDesc) uploadDesc.innerHTML = 'Upload an insurance claim document (PDF/image) or a <strong>ZIP archive containing all claim documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR claim record.';
+  } else {
+    if (uploadTitle) uploadTitle.textContent = "Upload Patient Document or ZIP Archive";
+    if (uploadDesc) uploadDesc.innerHTML = 'Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.';
+  }
+
+  // Update extracted data section title
+  const extractedTitle = $("#extractedDataTitle");
+  if (extractedTitle) extractedTitle.textContent = mode === "insurance" ? "Extracted Claim Data" : "Extracted Clinical Data";
+
+  // Update patient records / claims reports section
+  const sectionTitle = $("#patientsSectionTitle");
+  if (sectionTitle) sectionTitle.textContent = mode === "insurance" ? "Claims Reports" : "Patient Records";
+
+  // Update empty state text
+  const patientsList = $("#patientsList");
+  if (patientsList && patientsList.querySelector(".muted")) {
+    patientsList.querySelector(".muted").textContent = mode === "insurance"
+      ? "No claims recorded yet. Upload claim documents to populate."
+      : "No patients recorded yet. Upload lab reports to populate.";
+  }
+
+  // Reset upload state
+  selectedFile = null;
+  if (fileInput) fileInput.value = "";
+  if (fileInfoEl) fileInfoEl.textContent = "No file selected";
+  if (convertButton) convertButton.disabled = true;
+  if (errorBox) { errorBox.hidden = true; errorBox.textContent = ""; }
+
+  // Hide patient detail if open
+  const detail = $("#patientDetail");
+  if (detail) detail.hidden = true;
+
+  // Reload active tab data
+  const activeTab = $(".tab-btn.active");
+  if (activeTab) {
+    if (activeTab.dataset.tab === "patients") loadPatients();
+    if (activeTab.dataset.tab === "explorer") loadBundles();
+  }
+
+  // Refresh health/stats for new portal
+  checkHealth();
+}
+
+
+// ═══════════════════════════════════════════════
 // Health Check & Stats
 // ═══════════════════════════════════════════════
 
 async function checkHealth() {
   try {
-    const res = await fetch("/api/health");
+    const res = await fetch(`${apiBase()}/health`);
     if (res.ok) {
       const data = await res.json();
       if (data.toolkit === "ok") {
@@ -112,7 +211,7 @@ async function checkHealth() {
   }
 
   try {
-    const res = await fetch("/api/stats");
+    const res = await fetch(`${apiBase()}/stats`);
     if (res.ok) {
       const s = await res.json();
       dbStats.innerHTML = `
@@ -201,7 +300,7 @@ async function convertSelectedFile() {
   stageTimers.push(setTimeout(() => updateStepper(3), 5200));
 
   try {
-    const response = await fetch("/api/convert", { method: "POST", body: formData });
+    const response = await fetch(`${apiBase()}/convert`, { method: "POST", body: formData });
     clearStageTimers();
     updateStepper(4);
 
@@ -437,10 +536,10 @@ function renderValidation(val) {
 async function loadPatients() {
   const container = $("#patientsList");
   try {
-    const res = await fetch("/api/patients");
+    const res = await fetch(`${apiBase()}/patients`);
     const patients = await res.json();
     if (!patients.length) {
-      container.innerHTML = '<p class="muted">No patients recorded yet. Upload patient archives or lab reports to populate.</p>';
+      container.innerHTML = `<p class="muted">${portalMode === "insurance" ? "No claims recorded yet. Upload claim documents to populate." : "No patients recorded yet. Upload patient archives or lab reports to populate."}</p>`;
       return;
     }
     container.innerHTML = patients.map((p) => {
@@ -456,8 +555,8 @@ async function loadPatients() {
       return `
         <div class="patient-card" onclick="viewPatient('${p.id}')">
           <div class="pc-header">
-            <div class="pc-name">${escapeHtml(p.name || "Unknown Patient")}</div>
-            <button class="pc-delete-btn" title="Delete Patient Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
+            <div class="pc-name">${escapeHtml(p.name || (portalMode === "insurance" ? "Unknown Claimant" : "Unknown Patient"))}</div>
+            <button class="pc-delete-btn" title="Delete ${portalMode === "insurance" ? "Claim" : "Patient"} Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -481,7 +580,7 @@ async function deletePatient(patientId, patientName) {
     return;
   }
   try {
-    const res = await fetch(`/api/patients/${patientId}`, { method: "DELETE" });
+    const res = await fetch(`${apiBase()}/patients/${patientId}`, { method: "DELETE" });
     if (!res.ok) throw new Error("Failed to delete patient record");
     const detail = $("#patientDetail");
     if (detail) detail.hidden = true;
@@ -510,7 +609,7 @@ async function viewPatient(patientId) {
   `;
 
   try {
-    const res = await fetch(`/api/patients/${patientId}`);
+    const res = await fetch(`${apiBase()}/patients/${patientId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const patient = data.patient || {};
@@ -518,7 +617,8 @@ async function viewPatient(patientId) {
     const observations = data.observations || [];
 
     if (nameEl) {
-      nameEl.textContent = `Clinical Diagnostic Report — ${patient.name || "Patient"}`;
+      const reportLabel = portalMode === "insurance" ? "Insurance Claim Report" : "Clinical Diagnostic Report";
+      nameEl.textContent = `${reportLabel} \u2014 ${patient.name || "Patient"}`;
     }
 
     // Parse patient_json
@@ -970,7 +1070,7 @@ async function viewPatient(patientId) {
               </div>
               <div class="report-title-box">
                 <h3>${escapeHtml(facilityName)}</h3>
-                <p>NABL ACCREDITED CLINICAL PATHOLOGY • HL7® FHIR® R4 / ABDM CERTIFIED CONSOLIDATED RECORD</p>
+                <p>${portalMode === "insurance" ? "INSURANCE CLAIM PROCESSING \u2022 HL7\u00ae FHIR\u00ae R4 / ABDM CERTIFIED CLAIM RECORD" : "NABL ACCREDITED CLINICAL PATHOLOGY \u2022 HL7\u00ae FHIR\u00ae R4 / ABDM CERTIFIED CONSOLIDATED RECORD"}</p>
               </div>
             </div>
             <div class="report-status-box">
@@ -1160,27 +1260,27 @@ async function viewPatient(patientId) {
           <!-- Physician & Superintendent Sign-off Stamp Block -->
           <div class="report-signoff-block">
             <div class="signoff-col">
-              <span class="signoff-label">Attending Pathologist / Clinician</span>
+              <span class="signoff-label">${portalMode === "insurance" ? "Claims Processing Officer" : "Attending Pathologist / Clinician"}</span>
               <span class="signoff-name">${escapeHtml(practitionerName)}</span>
-              <span class="signoff-sub">${escapeHtml(facilityName)} • Clinical Pathology</span>
+              <span class="signoff-sub">${escapeHtml(facilityName)} \u2022 ${portalMode === "insurance" ? "Claims Division" : "Clinical Pathology"}</span>
               <div class="signoff-stamp">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 Digitally Signed &amp; Authorized
               </div>
             </div>
             <div class="signoff-col">
-              <span class="signoff-label">Medical Superintendent / Lab Director</span>
-              <span class="signoff-name">Chief Medical Officer, Diagnostics</span>
-              <span class="signoff-sub">Hospital Information &amp; Records Division</span>
+              <span class="signoff-label">${portalMode === "insurance" ? "Chief Claims Officer" : "Medical Superintendent / Lab Director"}</span>
+              <span class="signoff-name">${portalMode === "insurance" ? "Insurance Claims Authority" : "Chief Medical Officer, Diagnostics"}</span>
+              <span class="signoff-sub">${portalMode === "insurance" ? "Claims Processing & Verification Division" : "Hospital Information &amp; Records Division"}</span>
               <div class="signoff-stamp">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                Certified Clinical Record
+                Certified ${portalMode === "insurance" ? "Claim" : "Clinical"} Record
               </div>
             </div>
             <div class="signoff-col">
               <span class="signoff-label">FHIR &amp; ABDM Verification</span>
               <span class="signoff-name">HL7® FHIR® R4 Validated</span>
-              <span class="signoff-sub">NRCeS / ABDM DiagnosticReport Record</span>
+              <span class="signoff-sub">${portalMode === "insurance" ? "Insurance FHIR Claim Record" : "NRCeS / ABDM DiagnosticReport Record"}</span>
               <div class="signoff-stamp">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 100% Standards Compliant
@@ -1338,12 +1438,12 @@ async function viewPatient(patientId) {
             return;
           }
           try {
-            const res = await fetch(`/api/bundles/${selectedBundle.id}`, { method: "DELETE" });
+            const res = await fetch(`${apiBase()}/bundles/${selectedBundle.id}`, { method: "DELETE" });
             if (!res.ok) throw new Error("Failed to delete report bundle");
             await loadPatients();
             await checkHealth();
             // Refresh patient detail or close if no reports left
-            const refreshed = await fetch(`/api/patients/${patientId}`);
+            const refreshed = await fetch(`${apiBase()}/patients/${patientId}`);
             if (refreshed.ok) {
               const freshData = await refreshed.json();
               if (freshData.bundles && freshData.bundles.length) {
@@ -1439,7 +1539,7 @@ function getInterpretation(val, refRangeStr, obs) {
 async function loadBundles() {
   const container = $("#bundlesList");
   try {
-    const res = await fetch("/api/bundles");
+    const res = await fetch(`${apiBase()}/bundles`);
     const bundles = await res.json();
     if (!bundles.length) {
       container.innerHTML = '<p class="muted">No bundles stored yet.</p>';
@@ -1462,7 +1562,7 @@ async function viewBundle(bundleId) {
   detail.hidden = false;
 
   try {
-    const res = await fetch(`/api/bundles/${bundleId}`);
+    const res = await fetch(`${apiBase()}/bundles/${bundleId}`);
     const data = await res.json();
     const b = data.bundle || {};
     const v = data.validation || {};
