@@ -295,6 +295,11 @@ def _group_tests_by_panel(
   unpanelled_tests: list[resources.LabTest] = []
 
   for test in tests:
+    if not test:
+      continue
+    # Skip tests or section banners that have no measured result value recorded
+    if test.result is None or not str(test.result).strip():
+      continue
     if test.panel_name:
       panel_name = test.panel_name
       panel_data = panels[panel_name]

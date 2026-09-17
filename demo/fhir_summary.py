@@ -51,7 +51,15 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
       (r for r in resources if r.get("resourceType") == "Patient"), {}
   )
   observations = [
-      r for r in resources if r.get("resourceType") == "Observation"
+      r
+      for r in resources
+      if r.get("resourceType") == "Observation"
+      and not (
+          r.get("hasMember")
+          and not r.get("valueQuantity")
+          and not r.get("valueString")
+          and not r.get("valueCodeableConcept")
+      )
   ]
 
   profiles = []

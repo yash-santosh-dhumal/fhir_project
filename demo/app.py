@@ -30,6 +30,8 @@ try:
       ArchiveSecurityError,
       extract_and_analyze_archive,
   )
+  from claim_summarizer import summarize_claim
+  from insurance_plan_extractor import extract_insurance_plan
   from fhir_store import FhirStore
   from fhir_summary import summarize_payload
   from fhir_unifier import unify_patient_bundles
@@ -43,6 +45,8 @@ except ImportError:
       ArchiveSecurityError,
       extract_and_analyze_archive,
   )
+  from demo.claim_summarizer import summarize_claim
+  from demo.insurance_plan_extractor import extract_insurance_plan
   from demo.fhir_store import FhirStore
   from demo.fhir_summary import summarize_payload
   from demo.fhir_unifier import unify_patient_bundles
@@ -134,30 +138,35 @@ def _optimize_image_if_needed(file_bytes: bytes, mime_type: str) -> tuple[bytes,
 
 
 def _do_convert(store: FhirStore):
-  """Shared conversion logic used by both hospital and insurance portals."""
+  """Shared conversion logic used by both hospital and insurance portals.
+
+  Returns:
+      Tuple of (response_data_dict, http_status_code, gemini_extraction_or_None).
+      The caller is responsible for calling jsonify on the dict.
+  """
   uploaded = request.files.get("file")
   if uploaded is None or uploaded.filename == "":
-    return _error("No file was uploaded.", 400)
+    return _error_dict("No file was uploaded."), 400, None
 
   mime_type = uploaded.mimetype or _infer_mime_type(uploaded.filename)
   if mime_type not in SUPPORTED_MIME_TYPES:
-    return _error("Supported formats are PDF, JPEG, PNG, WebP, BMP, TIFF, and ZIP archives.", 400)
+    return _error_dict("Supported formats are PDF, JPEG, PNG, WebP, BMP, TIFF, and ZIP archives."), 400, None
 
   file_bytes = uploaded.read()
   if not file_bytes:
-    return _error("The uploaded file is empty.", 400)
+    return _error_dict("The uploaded file is empty."), 400, None
 
   # Check if uploaded file is a ZIP archive containing multiple documents for the same patient
   if mime_type in ("application/zip", "application/x-zip-compressed") or (uploaded.filename and uploaded.filename.lower().endswith(".zip")):
     try:
       analysis = extract_and_analyze_archive(file_bytes, archive_name=uploaded.filename or "patient_archive.zip")
     except (ArchiveSecurityError, ArchiveFormatError) as exc:
-      return _error(f"Archive error: {exc}", 400)
+      return _error_dict(f"Archive error: {exc}"), 400, None
     except Exception as exc:
-      return _error(f"Failed to process archive: {exc}", 500)
+      return _error_dict(f"Failed to process archive: {exc}"), 500, None
 
     if analysis.document_count == 0:
-      return _error("No valid medical documents (PDF or images) found in the ZIP archive.", 400)
+      return _error_dict("No valid medical documents (PDF or images) found in the ZIP archive."), 400, None
 
     start = time.perf_counter()
     log.info("Processing all %d documents from ZIP '%s' with Gemini high-level OCR...",
@@ -237,7 +246,7 @@ def _do_convert(store: FhirStore):
     summary = summarize_payload(unified_payload)
     validation = validate_bundle(master_bundle)
 
-    return jsonify({
+    return {
         "duration_ms": duration_ms,
         "summary": summary,
         "raw": master_bundle,
@@ -260,7 +269,7 @@ def _do_convert(store: FhirStore):
             "source_files": source_names if extracted_bundles else [d.relative_path for d in analysis.documents],
             "skipped_count": analysis.skipped_count,
         },
-    })
+    }, 200, gemini_extraction
 
   file_bytes, mime_type = _optimize_image_if_needed(file_bytes, mime_type)
 
@@ -273,17 +282,29 @@ def _do_convert(store: FhirStore):
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
   except requests.ConnectionError:
-    return _error(
+    return _error_dict(
         f"Medical Data Toolkit is not reachable at {TOOLKIT_URL}. Ensure the backend service is running on port 8088.",
-        503,
-    )
+    ), 503, None
   except requests.Timeout:
-    return _error("Medical Data Toolkit timed out while processing the document.", 504)
+    return _error_dict("Medical Data Toolkit timed out while processing the document."), 504, None
   except requests.RequestException as exc:
-    return _error(f"Toolkit request failed: {exc}", 502)
+    return _error_dict(f"Toolkit request failed: {exc}"), 502, None
 
   duration_ms = round((time.perf_counter() - start) * 1000, 2)
   safe_error = _safe_toolkit_error(toolkit_response)
+
+  # Parse toolkit response first so 'summary' is available for fallback check
+  payload = {}
+  standardized_docs = []
+  summary = {}
+  if toolkit_response.ok:
+    try:
+      payload = toolkit_response.json()
+      standardized_docs = payload.get("standardized_medical_documents", []) or []
+      summary = summarize_payload(payload)
+    except Exception:
+      pass
+
   # If toolkit cannot process this document (e.g. Aadhaar, Discharge Summary, Non-Lab),
   # fall back to Gemini high-level OCR to extract patient demographics and generate FHIR
   if not toolkit_response.ok or not summary.get("bundle", {}).get("found"):
@@ -313,28 +334,26 @@ def _do_convert(store: FhirStore):
       unified_payload = {"standardized_medical_documents": [{"fhir_bundle": master_bundle, "document_type": "CLINICAL_RECORD"}]}
       summary = summarize_payload(unified_payload)
       validation = validate_bundle(master_bundle)
-      return jsonify({
+      return {
           "duration_ms": duration_ms,
           "summary": summary,
           "raw": master_bundle,
           "validation": validation,
           "stored_bundle_ids": [bid],
-      })
+      }, 200, gemini_extraction
     except Exception as exc:
       log.error("Gemini fallback failed for '%s': %s", uploaded.filename, exc)
       if not toolkit_response.ok:
-        return _error(
+        return _error_dict(
             f"Document conversion failed: {safe_error}",
-            422,
             toolkit_response.status_code,
             duration_ms,
-        )
-      return _error(
+        ), 422, None
+      return _error_dict(
           "The document could not be converted to a FHIR bundle.",
-          422,
           toolkit_response.status_code,
           duration_ms,
-      )
+      ), 422, None
 
   # Auto-store bundle in FHIR store
   bundles_from_payload = []
@@ -353,18 +372,19 @@ def _do_convert(store: FhirStore):
   # Run validation
   validation = validate_bundle(payload)
 
-  return jsonify({
+  return {
       "duration_ms": duration_ms,
       "summary": summary,
       "raw": payload,
       "validation": validation,
       "stored_bundle_ids": stored_bundle_ids,
-  })
+  }, 200, None
 
 
 @app.post("/api/convert")
 def convert():
-  return _do_convert(fhir_store)
+  data, status, _extraction = _do_convert(fhir_store)
+  return jsonify(data), status
 
 
 # ── Patient records ──
@@ -444,7 +464,7 @@ def stats():
 
 @app.post("/api/insurance/convert")
 def insurance_convert():
-    return _do_convert(insurance_store)
+    return _do_insurance_convert(insurance_store)
 
 
 @app.get("/api/insurance/patients")
@@ -459,6 +479,17 @@ def insurance_get_patient(patient_id: str):
         return _error("Patient not found.", 404)
     bundles = insurance_store.get_bundles_for_patient(patient_id)
     observations = insurance_store.get_observations_for_patient(patient_id)
+    # Ensure each bundle has claim_summary (only for claim dossiers, not insurance plans)
+    for b in bundles:
+        try:
+            b_json = json.loads(b["bundle_json"]) if isinstance(b.get("bundle_json"), str) else b.get("bundle_json", {})
+            if "insurance_plan" not in b_json and "claim_summary" not in b_json:
+                cs = summarize_claim(fhir_bundle=b_json)
+                b_json["claim_summary"] = cs.to_dict()
+                b["bundle_json"] = json.dumps(b_json)
+                insurance_store.update_bundle_json(b["id"], b["bundle_json"])
+        except Exception as exc:
+            log.warning("Failed to auto-populate claim_summary for bundle %s: %s", b.get("id"), exc)
     return jsonify({"patient": patient, "bundles": bundles, "observations": observations})
 
 
@@ -482,7 +513,12 @@ def insurance_get_bundle(bundle_id: str):
         return _error("Bundle not found.", 404)
     bundle_json = json.loads(bundle["bundle_json"]) if bundle.get("bundle_json") else {}
     validation = validate_bundle(bundle_json)
-    return jsonify({"bundle": bundle, "validation": validation})
+    return jsonify({
+        "bundle": bundle,
+        "validation": validation,
+        "insurance_plan": bundle_json.get("insurance_plan"),
+        "claim_summary": bundle_json.get("claim_summary"),
+    })
 
 
 @app.delete("/api/insurance/bundles/<bundle_id>")
@@ -507,18 +543,138 @@ def insurance_stats():
     return jsonify(insurance_store.get_stats())
 
 
+@app.get("/api/insurance/health")
+def insurance_health():
+    return health()
+
+
+def _do_insurance_convert(store: FhirStore):
+    """Insurance-specific conversion: extracts InsurancePlan details & benefits, builds FHIR bundle."""
+    if "file" not in request.files:
+        return _error("No file provided in request.", 400)
+    uploaded = request.files["file"]
+    if not uploaded or not uploaded.filename:
+        return _error("Empty filename provided.", 400)
+
+    filename = uploaded.filename
+    file_bytes = uploaded.read()
+    if not file_bytes:
+        return _error("Uploaded file is empty.", 400)
+    uploaded.seek(0)
+
+    # For ZIP archives, use existing archive pipeline
+    if filename.lower().endswith(".zip"):
+        data, status, gemini_extraction = _do_convert(store)
+        if status == 200 and "error" not in data:
+            try:
+                fhir_bundle = data.get("raw")
+                archive_info = data.get("archive_info")
+                claim_summary = summarize_claim(
+                    gemini_extraction=gemini_extraction,
+                    fhir_bundle=fhir_bundle if isinstance(fhir_bundle, dict) else None,
+                    archive_info=archive_info,
+                )
+                cs_dict = claim_summary.to_dict()
+                data["claim_summary"] = cs_dict
+            except Exception as exc:
+                log.warning("Claim summarization failed (non-fatal): %s", exc)
+        return jsonify(data), status
+
+    # For PDF or image documents on insurance side:
+    mime_type = _infer_mime_type(filename)
+    start = time.perf_counter()
+    try:
+        plan_details, fhir_bundle = extract_insurance_plan(file_bytes, mime_type, filename)
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+        # Store bundle in insurance SQLite store
+        bid = store.store_bundle(
+            fhir_bundle,
+            source_filename=filename,
+            document_type="INSURANCE_PLAN",
+        )
+        plan_details.bundle_id = bid
+        plan_dict = plan_details.to_dict()
+
+        # Embed insurance_plan in the stored bundle json
+        fhir_bundle["insurance_plan"] = plan_dict
+        store.update_bundle_json(bid, json.dumps(fhir_bundle))
+
+        # Validate bundle
+        validation = validate_bundle(fhir_bundle)
+
+        # Build summary
+        summary = {
+            "bundle": {
+                "found": True,
+                "type": "document",
+                "resource_count": len(fhir_bundle.get("entry", [])),
+                "profiles": [
+                    p for e in fhir_bundle.get("entry", [])
+                    for p in e.get("resource", {}).get("meta", {}).get("profile", [])
+                ],
+            },
+            "patient": {
+                "name": plan_details.plan_name,
+                "gender": "unknown",
+                "birthDate": "Not available",
+                "address": "Not available",
+                "aadhaar": "Not available",
+                "abha": "Not available",
+                "phone": "Not available",
+                "guardian": "Not available",
+                "hospital_id": "Not available",
+                "mrn": plan_details.uin,
+            },
+            "observations": [],
+        }
+
+        # Also attempt claim summary narrative
+        try:
+            cs = summarize_claim(fhir_bundle=fhir_bundle)
+            claim_summary_dict = cs.to_dict()
+        except Exception:
+            claim_summary_dict = None
+
+        return jsonify({
+            "duration_ms": duration_ms,
+            "summary": summary,
+            "raw": fhir_bundle,
+            "validation": validation,
+            "stored_bundle_ids": [bid],
+            "insurance_plan": plan_dict,
+            "claim_summary": claim_summary_dict,
+        }), 200
+
+    except Exception as exc:
+        log.warning("Insurance plan extraction failed, falling back to standard convert: %s", exc)
+        uploaded.seek(0)
+        data, status, gemini_extraction = _do_convert(store)
+        return jsonify(data), status
+
+
 def _error(
     message: str,
     status: int,
     toolkit_status: int | None = None,
     duration_ms: float | None = None,
 ):
+  payload = _error_dict(message, toolkit_status, duration_ms)
+  return jsonify(payload), status
+
+
+def _error_dict(
+    message: str,
+    toolkit_status: int | None = None,
+    duration_ms: float | None = None,
+) -> dict[str, Any]:
+  """Returns an error payload dict without jsonify (for _do_convert internal use)."""
   payload: dict[str, Any] = {"error": message}
   if toolkit_status is not None:
     payload["toolkit_status"] = toolkit_status
   if duration_ms is not None:
     payload["duration_ms"] = duration_ms
-  return jsonify(payload), status
+  return payload
 
 
 def _safe_toolkit_error(response: requests.Response) -> str:

@@ -52,6 +52,7 @@
 
 /* ── Global Reset ── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+[hidden] { display: none !important; }
 html { font-size:16px; scroll-behavior:smooth; }
 body {
   font-family:var(--font-sans);
@@ -1403,7 +1404,9 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
   #validationSection, #summaryGrid, .raw-card, #tab-batch, #tab-explorer,
   #patientsList, .section-header, .report-footer .report-actions,
   #reportBundleSelect, #toggleReportJsonBtn, #copyReportJsonBtn, #reportRawJsonWrap,
-  .obs-toolbar, .pc-delete-btn, #downloadReportJsonBtn, #deleteCurrentReportBtn {
+  .obs-toolbar, .pc-delete-btn, #downloadReportJsonBtn, #deleteCurrentReportBtn,
+  .portal-switcher, #closePatientDetailBtn, .iop-bundle-selector, .report-footer,
+  .report-actions, .obs-count-badge {
     display: none !important;
   }
   .patient-report-card {
@@ -1616,6 +1619,255 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
     color: #065f46 !important;
     border: 1px dashed #10b981 !important;
   }
+
+  /* ═══ One-Page Insurance Print Report Strict Layout ═══ */
+  @page {
+    size: A4 portrait;
+    margin: 6mm 8mm;
+  }
+  .insurance-onepage-report {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1.5px solid #0f172a !important;
+    border-radius: 0 !important;
+    padding: 6px 10px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    box-sizing: border-box !important;
+    max-height: 278mm !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+    page-break-before: avoid !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    gap: 4px !important;
+  }
+
+  .insurance-onepage-report * {
+    box-sizing: border-box !important;
+  }
+
+  .iop-bundle-selector {
+    display: none !important;
+  }
+
+  .iop-header {
+    border-bottom: 1.5px solid #0f172a !important;
+    padding-bottom: 3px !important;
+    margin-bottom: 3px !important;
+    gap: 8px !important;
+  }
+  .iop-logo-box {
+    width: 28px !important;
+    height: 28px !important;
+    background: #f1f5f9 !important;
+    border: 1px solid #94a3b8 !important;
+    color: #0f172a !important;
+  }
+  .iop-org-name {
+    color: #0f172a !important;
+    font-size: 10.5pt !important;
+    font-weight: 800 !important;
+    line-height: 1.1 !important;
+  }
+  .iop-sub-line {
+    color: #475569 !important;
+    font-size: 6pt !important;
+    letter-spacing: 0.04em !important;
+  }
+  .iop-claim-status-pill.approved {
+    background: #ecfdf5 !important;
+    color: #065f46 !important;
+    border: 1px solid #10b981 !important;
+    font-size: 6pt !important;
+    padding: 1px 6px !important;
+  }
+  .iop-meta-grid {
+    font-size: 6pt !important;
+    color: #334155 !important;
+    gap: 8px !important;
+  }
+  .iop-meta-grid span strong {
+    color: #0f172a !important;
+  }
+
+  .iop-grid-row {
+    gap: 4px !important;
+    margin-bottom: 3px !important;
+  }
+  .iop-panel {
+    background: #ffffff !important;
+    border: 1px solid #94a3b8 !important;
+    border-radius: 2px !important;
+    padding: 3px 6px !important;
+    gap: 3px !important;
+  }
+  .iop-panel-hdr {
+    border-bottom: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    font-size: 7pt !important;
+    font-weight: 700 !important;
+    padding-bottom: 2px !important;
+  }
+  .iop-detail-row {
+    font-size: 6.8pt !important;
+    gap: 4px !important;
+  }
+  .iop-detail-row.main {
+    padding-bottom: 2px !important;
+  }
+  .iop-label {
+    color: #64748b !important;
+    font-size: 6pt !important;
+  }
+  .iop-val {
+    color: #0f172a !important;
+    font-size: 7pt !important;
+  }
+  .iop-val.highlight {
+    font-size: 8.5pt !important;
+    color: #0f172a !important;
+  }
+  .iop-val.highlight-sub {
+    color: #0f172a !important;
+  }
+  .iop-val.diag-val {
+    color: #b91c1c !important;
+  }
+  .iop-val.proc-val {
+    color: #b45309 !important;
+  }
+  .iop-sub-grid {
+    gap: 2px 8px !important;
+    padding-top: 2px !important;
+  }
+  .iop-mini-tag {
+    background: #ecfdf5 !important;
+    border: 1px solid #10b981 !important;
+    color: #065f46 !important;
+    font-size: 5pt !important;
+  }
+
+  .iop-financial-ribbon {
+    gap: 3px !important;
+  }
+  .iop-fin-box {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 2px 5px !important;
+  }
+  .iop-fin-box.highlight-primary {
+    background: #eff6ff !important;
+    border: 1px solid #3b82f6 !important;
+  }
+  .iop-fin-box.highlight-primary .iop-fin-amt {
+    color: #1d4ed8 !important;
+  }
+  .iop-fin-box.highlight-success {
+    background: #f0fdf4 !important;
+    border: 1px solid #16a34a !important;
+  }
+  .iop-fin-box.highlight-success .iop-fin-amt {
+    color: #15803d !important;
+  }
+  .iop-fin-box.highlight-info {
+    background: #f5f3ff !important;
+    border: 1px solid #6366f1 !important;
+  }
+  .iop-fin-box.highlight-info .iop-fin-amt {
+    color: #4338ca !important;
+  }
+  .iop-fin-lbl {
+    color: #475569 !important;
+    font-size: 5.5pt !important;
+  }
+  .iop-fin-amt {
+    color: #0f172a !important;
+    font-size: 8.5pt !important;
+  }
+  .iop-fin-sub {
+    color: #64748b !important;
+    font-size: 5pt !important;
+  }
+
+  .iop-fin-breakdown-wrap {
+    margin-top: 3px !important;
+  }
+  .iop-fin-table {
+    font-size: 6pt !important;
+  }
+  .iop-fin-table td {
+    padding: 1.5px 4px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    color: #0f172a !important;
+  }
+  .iop-fin-table .iop-line-lbl {
+    color: #334155 !important;
+  }
+  .iop-fin-table .iop-line-amt {
+    color: #0f172a !important;
+  }
+  .iop-fin-summary-row {
+    font-size: 6.5pt !important;
+    color: #334155 !important;
+    padding: 1px 0 !important;
+  }
+
+  .iop-narrative {
+    font-size: 6.5pt !important;
+    line-height: 1.3 !important;
+    color: #1e293b !important;
+    background: #f8fafc !important;
+    border-left: 2.5px solid #2563eb !important;
+    padding: 3px 6px !important;
+    margin-bottom: 3px !important;
+  }
+  .iop-pillars-grid {
+    gap: 3px !important;
+  }
+  .iop-pillar-card {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    padding: 2px 4px !important;
+  }
+  .iop-pillar-title {
+    color: #1e40af !important;
+    font-size: 6pt !important;
+  }
+  .iop-pillar-text {
+    color: #475569 !important;
+    font-size: 5.5pt !important;
+    line-height: 1.25 !important;
+  }
+
+  .iop-signoff-block {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 3px 6px !important;
+    gap: 6px !important;
+    margin-top: 3px !important;
+  }
+  .iop-sign-label {
+    color: #64748b !important;
+    font-size: 5pt !important;
+  }
+  .iop-sign-name {
+    color: #0f172a !important;
+    font-size: 7pt !important;
+  }
+  .iop-sign-sub {
+    color: #475569 !important;
+    font-size: 5.5pt !important;
+  }
+  .iop-sign-stamp {
+    background: #ecfdf5 !important;
+    border: 1px dashed #10b981 !important;
+    color: #065f46 !important;
+    font-size: 5pt !important;
+    padding: 1px 4px !important;
+  }
 }
 
 
@@ -1662,4 +1914,1042 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
   flex-shrink: 0;
 }
 
+
+/* ── Insurance Claim Summary Components ── */
+
+.claim-key-fields,
+.claim-doc-sections {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.claim-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 14px;
+}
+.claim-section-title svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.claim-narrative {
+  font-size: 0.84rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  background: rgba(59, 130, 246, 0.06);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  margin: 0 0 14px;
+}
+
+.claim-flags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.claim-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 20px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.claim-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 16px;
+}
+
+.claim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.claim-field-highlight {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+}
+.claim-field-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.claim-field-value {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.claim-field-highlight .claim-field-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ── Document Section Accordion ── */
+
+.claim-doc-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  margin-bottom: 6px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.claim-doc-section:last-child {
+  margin-bottom: 0;
+}
+.claim-doc-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--bg-input);
+  transition: background 0.15s ease;
+}
+.claim-doc-section-header:hover {
+  background: var(--bg-card-hover);
+}
+.claim-doc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.claim-doc-section-title .chevron-icon {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+.claim-doc-section.expanded .claim-doc-section-title .chevron-icon {
+  transform: rotate(180deg);
+}
+.claim-doc-section-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.claim-doc-section-body {
+  max-height: 0;
+  overflow: hidden;
+  padding: 0 14px;
+  transition: max-height 0.25s ease, padding 0.25s ease;
+}
+.claim-doc-section.expanded .claim-doc-section-body {
+  max-height: 500px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.claim-doc-section-body p {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.claim-section-points {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style-type: disc;
+}
+.claim-section-points li {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 3px;
+}
+
+/* ── Financial Summary Card ── */
+
+.financial-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.financial-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  transition: border-color 0.15s ease;
+}
+.financial-item:hover {
+  border-color: var(--accent);
+}
+.financial-item-primary {
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.financial-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.financial-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.financial-item-primary .financial-value {
+  color: var(--success);
+  font-size: 1.05rem;
+}
+.financial-source {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Claim Financial Highlight Bar ── */
+
+.claim-financial-highlight-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.claim-metric-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  min-width: 140px;
+  transition: all 0.15s ease;
+}
+
+.claim-metric-badge:hover {
+  border-color: var(--accent);
+}
+
+.claim-metric-badge.primary {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.claim-metric-badge.primary .metric-val {
+  color: var(--accent);
+  font-size: 1.1rem;
+}
+
+.claim-metric-badge.success {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.claim-metric-badge.success .metric-val {
+  color: var(--success);
+}
+
+.claim-metric-badge.info {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.claim-metric-badge.info .metric-val {
+  color: #818cf8;
+}
+
+.claim-metric-badge .metric-lbl {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.claim-metric-badge .metric-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Insurance One-Page Executive Report Screen Styles
+   ══════════════════════════════════════════════════════════════════ */
+
+.insurance-onepage-report {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.iop-bundle-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  padding: 6px 12px;
+  background: var(--bg-input);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.iop-bundle-selector select {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+/* ── Top Header ── */
+.iop-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+  gap: 16px;
+}
+
+.iop-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.iop-logo-box {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(16, 185, 129, 0.2));
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.iop-title-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.iop-org-name {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.iop-sub-line {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.iop-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.iop-claim-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.iop-claim-status-pill.approved {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.iop-meta-grid {
+  display: flex;
+  gap: 14px;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.iop-meta-grid span strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+/* ── Grid Layouts ── */
+.iop-grid-row {
+  display: grid;
+  gap: 12px;
+}
+
+.iop-two-col {
+  grid-template-columns: 1fr 1fr;
+}
+
+.iop-panel {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.iop-panel-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.iop-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.iop-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.iop-detail-row.main {
+  padding-bottom: 4px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.iop-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.iop-val {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.iop-val.highlight {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.iop-val.highlight-sub {
+  color: #60a5fa;
+  font-weight: 700;
+}
+
+.iop-val.diag-val {
+  color: #f87171;
+  font-weight: 700;
+}
+
+.iop-val.proc-val {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.iop-sub-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  padding-top: 4px;
+}
+
+.iop-sub-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.iop-mini-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  padding: 1px 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-radius: 3px;
+  margin-left: 3px;
+}
+
+/* ── Financial Section ── */
+.iop-financial-ribbon {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.iop-fin-box {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: all 0.2s ease;
+}
+
+.iop-fin-box.highlight-primary {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.iop-fin-box.highlight-primary .iop-fin-amt {
+  color: #60a5fa;
+}
+
+.iop-fin-box.highlight-success {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.iop-fin-box.highlight-success .iop-fin-amt {
+  color: #34d399;
+}
+
+.iop-fin-box.highlight-info {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.iop-fin-box.highlight-info .iop-fin-amt {
+  color: #a5b4fc;
+}
+
+.iop-fin-lbl {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.iop-fin-amt {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.iop-fin-sub {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* ── Financial Breakdown Table ── */
+.iop-fin-breakdown-wrap {
+  margin-top: 6px;
+}
+
+.iop-fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.iop-fin-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.iop-fin-table .iop-line-lbl {
+  color: var(--text-secondary);
+}
+
+.iop-fin-table .iop-line-amt {
+  text-align: right;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.iop-fin-grid-fallback {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  margin-top: 4px;
+}
+
+.iop-fin-summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.iop-fin-summary-row.highlight {
+  border-bottom: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Executive Summary & Pillars ── */
+.iop-narrative {
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0 0 6px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: var(--radius-xs);
+  border-left: 3px solid var(--accent);
+}
+
+.iop-pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.iop-pillar-card {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.iop-pillar-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.iop-pillar-text {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Sign-off Stamps ── */
+.iop-signoff-block {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.iop-signoff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.iop-sign-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.iop-sign-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.iop-sign-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.iop-sign-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px dashed rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  font-size: 0.68rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Insurance Plan Details & Benefits View (Pixel-Matched to Design)
+   ═══════════════════════════════════════════════════════════════ */
+.insurance-plan-container {
+  width: 100%;
+  margin-top: 18px;
+  margin-bottom: 24px;
+}
+
+/* ── Validation Passed Top Banner ── */
+.ip-validation-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #eef9f2;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 12px 22px;
+  margin-bottom: 22px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.ip-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.ip-banner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ip-banner-title {
+  font-weight: 700;
+  font-size: 15px;
+  color: #065f46;
+}
+
+.ip-banner-detail {
+  font-size: 13.5px;
+  color: #475569;
+}
+
+.ip-banner-detail .val-valid {
+  color: #059669;
+  font-weight: 700;
+}
+
+.ip-saved-badge {
+  background: #ffffff;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 12.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  display: inline-block;
+}
+
+/* ── Insurance Plan Details Card ── */
+.ip-details-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px 28px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  margin-bottom: 24px;
+}
+
+.ip-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ip-icon-box {
+  width: 36px;
+  height: 36px;
+  background: #eff6ff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ip-card-header h3 {
+  font-size: 19px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.ip-details-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 14px;
+}
+
+.ip-details-grid .ip-metric-box:nth-child(1),
+.ip-details-grid .ip-metric-box:nth-child(2),
+.ip-details-grid .ip-metric-box:nth-child(3),
+.ip-details-grid .ip-metric-box:nth-child(4) {
+  grid-column: span 3;
+}
+
+.ip-details-grid .ip-metric-box:nth-child(5),
+.ip-details-grid .ip-metric-box:nth-child(6),
+.ip-details-grid .ip-metric-box:nth-child(7) {
+  grid-column: span 4;
+}
+
+@media (max-width: 900px) {
+  .ip-details-grid .ip-metric-box:nth-child(n) {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 600px) {
+  .ip-details-grid .ip-metric-box:nth-child(n) {
+    grid-column: span 12;
+  }
+}
+
+.ip-metric-box {
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.ip-metric-val {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.ip-metric-val.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ip-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+  padding: 2px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.ip-dot {
+  font-size: 15px;
+  line-height: 1;
+  color: #10b981;
+}
+
+/* ── Benefits Section ── */
+.ip-benefits-section {
+  margin-top: 24px;
+}
+
+.ip-benefits-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.ip-benefits-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ip-benefits-header h3 {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary, #ffffff);
+  margin: 0;
+}
+
+.ip-benefits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+@media (max-width: 850px) {
+  .ip-benefits-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ip-benefit-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+}
+
+.ip-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ip-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  letter-spacing: 0.2px;
+}
+
+.ip-badge-cat {
+  background: #e6f9f0;
+  color: #047857;
+  border: 1px solid #bbf7d0;
+}
+
+.ip-badge-type {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  text-transform: uppercase;
+}
+
+.ip-badge-val {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.ip-badge-cap {
+  background: #ffe4e6;
+  color: #9f1239;
+  border: 1px solid #fecdd3;
+}
+
+.ip-cond-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.ip-cond-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-cond-list li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13.5px;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.ip-cond-list li::before {
+  content: "•";
+  position: absolute;
+  left: 2px;
+  top: -1px;
+  color: #10b981;
+  font-size: 16px;
+  line-height: 1.2;
+}
 

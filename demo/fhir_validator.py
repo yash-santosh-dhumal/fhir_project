@@ -23,6 +23,7 @@ ABDM_PROFILES = {
     "Encounter": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Encounter",
     "Observation": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Observation",
     "DiagnosticReport": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReportLab",
+    "InsurancePlan": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/InsurancePlan",
 }
 
 # FMM levels for resource types used in this pipeline (FHIR R4)
@@ -31,6 +32,7 @@ FMM_LEVELS = {
     "Patient": {"level": "N", "label": "Normative"},
     "Observation": {"level": "N", "label": "Normative"},
     "Organization": {"level": "N", "label": "Normative"},
+    "InsurancePlan": {"level": 2, "label": "Trial Use"},
     "Practitioner": {"level": 3, "label": "Trial Use"},
     "DiagnosticReport": {"level": 3, "label": "Trial Use"},
     "Composition": {"level": 2, "label": "Trial Use"},
@@ -47,6 +49,11 @@ VALID_SYSTEMS = {
     "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
     "http://terminology.hl7.org/CodeSystem/observation-category",
     "http://terminology.hl7.org/CodeSystem/v2-0074",
+    "http://terminology.hl7.org/CodeSystem/insuranceplan-type",
+    "http://terminology.hl7.org/CodeSystem/insurance-coverage-type",
+    "https://irdai.gov.in/uin",
+    "https://irdai.gov.in",
+    "urn:iso:std:iso:4217",
     "http://hospital.smarthealthit.org",
     "https://healthid.ndhm.gov.in",
     "https://doctor.ndhm.gov.in",
@@ -116,14 +123,17 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
 
     # 3. Profile checks
     _check_bundle_profile(bundle, issues)
-    resource_types_used = set()
+    resource_types_used = set(r.get("resourceType", "Unknown") for r in resources)
+    is_insurance = "InsurancePlan" in resource_types_used
     for i, resource in enumerate(resources):
         rt = resource.get("resourceType", "Unknown")
-        resource_types_used.add(rt)
-        _check_resource_profile(resource, rt, i, issues)
+        _check_resource_profile(resource, rt, i, issues, is_insurance=is_insurance)
 
-    # 4. Required resource types for a lab report bundle
-    required_types = {"Composition", "Patient", "DiagnosticReport", "Observation"}
+    # 4. Required resource types based on bundle content
+    if "InsurancePlan" in resource_types_used:
+        required_types = {"Composition", "InsurancePlan", "Organization"}
+    else:
+        required_types = {"Composition", "Patient", "DiagnosticReport", "Observation"}
     missing_types = required_types - resource_types_used
     for mt in missing_types:
         issues.append(ValidationIssue("error", f"Required resource type '{mt}' is missing from the bundle"))
@@ -160,8 +170,10 @@ def _check_bundle_profile(bundle: dict, issues: list[ValidationIssue]) -> None:
         issues.append(ValidationIssue("warning", f"Bundle missing ABDM profile: {expected}", "Bundle.meta.profile"))
 
 
-def _check_resource_profile(resource: dict, rt: str, index: int, issues: list[ValidationIssue]) -> None:
+def _check_resource_profile(resource: dict, rt: str, index: int, issues: list[ValidationIssue], is_insurance: bool = False) -> None:
     profiles = resource.get("meta", {}).get("profile", []) or []
+    if is_insurance and rt == "Composition":
+        return
     expected = ABDM_PROFILES.get(rt)
     if expected:
         has_abdm = any(expected in p for p in profiles)

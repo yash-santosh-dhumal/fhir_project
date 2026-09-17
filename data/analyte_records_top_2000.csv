@@ -47,3 +47,8 @@ LOINC_NUM,core_analyte,LONG_COMMON_NAME,SYSTEM,PROPERTY,SCALE_TYP,COMMON_TEST_RA
 2276-4,Ferritin,Ferritin [Mass/volume] in Serum or Plasma,Ser/Plas,MCnc,Qn,46,"['Ferritin', 'Serum Ferritin']"
 62292-8,Vitamin D,25-hydroxyvitamin D3 [Mass/volume] in Serum or Plasma,Ser/Plas,MCnc,Qn,47,"['Vitamin D', '25-OH Vitamin D', 'Vitamin D3', '25-Hydroxy Vitamin D']"
 2132-9,Vitamin B12,Cobalamin (Vitamin B12) [Mass/volume] in Serum or Plasma,Ser/Plas,MCnc,Qn,48,"['Vitamin B12', 'B12', 'Cobalamin']"
+751-8,Absolute Neutrophils,Neutrophils [#/volume] in Blood,Bld,NCnc,Qn,49,"['Absolute Neutrophil Count', 'ANC', 'Absolute Neutrophils', 'Neutrophils Absolute']"
+731-0,Absolute Lymphocytes,Lymphocytes [#/volume] in Blood,Bld,NCnc,Qn,50,"['Absolute Lymphocyte Count', 'ALC', 'Absolute Lymphocytes', 'Lymphocytes Absolute']"
+742-7,Absolute Monocytes,Monocytes [#/volume] in Blood,Bld,NCnc,Qn,51,"['Absolute Monocyte Count', 'AMC', 'Absolute Monocytes', 'Monocytes Absolute']"
+711-2,Absolute Eosinophils,Eosinophils [#/volume] in Blood,Bld,NCnc,Qn,52,"['Absolute Eosinophil Count', 'AEC', 'Absolute Eosinophils', 'Eosinophils Absolute']"
+704-7,Absolute Basophils,Basophils [#/volume] in Blood,Bld,NCnc,Qn,53,"['Absolute Basophil Count', 'ABC', 'Absolute Basophils', 'Basophils Absolute']"

@@ -5,3 +5,13 @@ Guidelines:
 1. For optional fields (like email, fax, website in contact), if they are not present in the document, set them to null.
 2. Ensure the JSON is well-formed, complete, and compact (without indentation or newlines). Do not add extra whitespaces or newlines at the end of the JSON.
 3. Always close all opened braces (e.g., `}`, `]`) correctly.
+4. Section Headers & Test Extraction:
+   - Do NOT extract section/category headers, banners, or notes (such as "Complete Blood Count (CBC)/ Hemogram", "DIFFERENTIAL LEUKOCYTE COUNT (DLC)", "ABSOLUTE LEUKOCYTE COUNT", "Comments on PBS") as individual lab tests.
+   - Only extract actual laboratory test analytes that have a measured result value.
+   - When tests appear under a section or panel heading, populate `panel_name` with that section title for each test within that group.
+5. Differential & Absolute Cell Counts:
+   - For relative counts (percentages), extract the specific analyte (e.g., core_analyte "Neutrophils", "Lymphocytes", "Monocytes", "Eosinophils", "Basophils") with their result, unit (e.g., "%"), and reference range.
+   - For absolute cell counts, extract them as distinct tests (e.g., core_analyte "Absolute Neutrophils", "Absolute Lymphocytes", "Absolute Monocytes", "Absolute Eosinophils", "Absolute Basophils") with their result, unit (e.g., "x10^3 /µL", "/µL"), and reference range.
+6. Patient Identifiers & Demographics:
+   - If an explicit MRN is not labeled but "Lab No.", "CR No.", "Sample No.", or "Registration No." is present, extract this value into `patient.identifiers.mr`.
+   - If exact Date of Birth (`dob`) is not printed but patient `Age` is specified (e.g., "19 Yr"), calculate or approximate `dob` in "YYYY-MM-DD" format based on the report collection date year minus the age (e.g., collection year 2023 minus 19 years gives birth year 2004, so "2004-01-01").

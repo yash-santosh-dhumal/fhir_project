@@ -109,5 +109,32 @@ class FhirSummaryTest(unittest.TestCase):
     self.assertEqual(observation["referenceRange"], NOT_AVAILABLE)
 
 
+  def test_panel_observation_excluded_from_observations_list(self):
+    summary = summarize_payload({
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "code": {"text": "Complete Blood Count"},
+                    "hasMember": [{"reference": "urn:uuid:test-1"}],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "code": {"text": "Hemoglobin"},
+                    "valueQuantity": {"value": 14.5, "unit": "g/dL"},
+                }
+            },
+        ],
+    })
+
+    # Only the individual test observation should be listed, not the container panel
+    self.assertEqual(len(summary["observations"]), 1)
+    self.assertEqual(summary["observations"][0]["test"], "Hemoglobin")
+    self.assertEqual(summary["observations"][0]["result"], "14.5")
+
+
 if __name__ == "__main__":
   unittest.main()

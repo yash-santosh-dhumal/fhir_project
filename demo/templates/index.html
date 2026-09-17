@@ -134,6 +134,91 @@
         </section>
 
 
+        <!-- Insurance Plan Details & Benefits (Insurance Mode) -->
+        <section id="insurancePlanSection" class="insurance-plan-container" hidden>
+          <!-- Validation Banner -->
+          <div class="ip-validation-banner">
+            <div class="ip-banner-left">
+              <div class="ip-banner-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <span class="ip-banner-title">FHIR Validation Passed</span>
+              </div>
+              <span class="ip-banner-detail">Python: <strong class="val-valid">Valid</strong></span>
+              <span class="ip-banner-detail">FHIR Validator: <strong class="val-valid">Valid</strong></span>
+            </div>
+            <div class="ip-banner-right">
+              <span class="ip-saved-badge">Saved to DB</span>
+            </div>
+          </div>
+
+          <!-- Insurance Plan Details Card -->
+          <div class="ip-details-card">
+            <div class="ip-card-header">
+              <div class="ip-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <line x1="10" y1="9" x2="8" y2="9"></line>
+                </svg>
+              </div>
+              <h3>Insurance Plan Details</h3>
+            </div>
+            <div class="ip-details-grid">
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">PLAN NAME</span>
+                <span class="ip-metric-val" id="ipdPlanName">—</span>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">INSURER</span>
+                <span class="ip-metric-val" id="ipdInsurer">—</span>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">UIN</span>
+                <span class="ip-metric-val" id="ipdUin">—</span>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">PLAN TYPE</span>
+                <span class="ip-metric-val" id="ipdPlanType">—</span>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">STATUS</span>
+                <div class="ip-metric-val" id="ipdStatus">
+                  <span class="ip-status-pill"><span class="ip-dot">•</span> Active</span>
+                </div>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">POLICY PERIOD</span>
+                <span class="ip-metric-val" id="ipdPolicyPeriod">— to —</span>
+              </div>
+              <div class="ip-metric-box">
+                <span class="ip-metric-label">BUNDLE ID</span>
+                <span class="ip-metric-val mono" id="ipdBundleId">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Benefits Section -->
+          <div class="ip-benefits-section">
+            <div class="ip-benefits-header">
+              <div class="ip-benefits-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="9 12 11.5 14.5 15.5 9.5"></polyline>
+                </svg>
+              </div>
+              <h3 id="ipdBenefitsTitle">Benefits (0)</h3>
+            </div>
+            <div class="ip-benefits-grid" id="ipdBenefitsGrid">
+              <!-- Benefit cards rendered here -->
+            </div>
+          </div>
+        </section>
+
         <!-- Quick summary row -->
         <section class="grid" id="summaryGrid">
           <article class="card">

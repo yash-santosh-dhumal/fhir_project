@@ -259,6 +259,12 @@ class FhirStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def update_bundle_json(self, bundle_id: str, bundle_json: str) -> None:
+        """Update the stored bundle_json for an existing bundle."""
+        conn = self._get_conn()
+        conn.execute("UPDATE bundles SET bundle_json=? WHERE id=?", (bundle_json, bundle_id))
+        conn.commit()
+
     def delete_bundle(self, bundle_id: str) -> bool:
         """Deletes a bundle and its observations from the store."""
         conn = self._get_conn()
