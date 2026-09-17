@@ -111,43 +111,52 @@ class AbdmLabReportFhirGenerator(fhir_generator.IFhirGenerator):
     # DOCUMENT.
     resources_to_bundle = []
 
-    # Create Master Observations and Test Observations first to get their IDs for
-    # Composition
+    # Create Observations in original document order while still building
+    # panel groupings for FHIR panel Observations.
     panels, unpanelled_tests = _group_tests_by_panel(lab_report.lab_tests)
     diagnostic_report_result_refs = []
 
+    # Pre-compute panel member refs and master observations so we can insert
+    # the master right after its last member while iterating in document order.
+    panel_member_refs: dict[str, list[str]] = {
+        pn: [] for pn in panels
+    }
+    panel_obs_ids: dict[str, str] = {}  # test id -> obs uuid
+    panel_last_test_idx: dict[str, int] = {}  # panel -> index of last test
+
+    # First pass: assign UUIDs and find last test index per panel
+    all_valid_tests = [
+        t for t in lab_report.lab_tests
+        if t and t.result is not None and str(t.result).strip()
+    ]
+    for idx, test in enumerate(all_valid_tests):
+      obs_id = str(uuid.uuid4())
+      panel_obs_ids[id(test)] = obs_id
+      if test.panel_name and test.panel_name in panels:
+        panel_member_refs[test.panel_name].append(f"urn:uuid:{obs_id}")
+        panel_last_test_idx[test.panel_name] = idx
+
+    # Build master observations ahead of time
+    panel_masters: dict[str, Any] = {}
+    panel_master_ids: dict[str, str] = {}
     for panel_name, panel_data in panels.items():
-      member_refs = []
-      for test in panel_data["tests"]:
-        obs_id = str(uuid.uuid4())
-        member_refs.append(f"urn:uuid:{obs_id}")
-
-        observation = resource_converter.create_lab_observation(
-            test,
-            obs_id,
-            patient_ref,
-            None,
-            collection_dt,
-            organization_ref,
-        )
-        resources_to_bundle.append(observation)
-
       master_obs_id = str(uuid.uuid4())
+      panel_master_ids[panel_name] = master_obs_id
       diagnostic_report_result_refs.append(f"urn:uuid:{master_obs_id}")
-
-      master_observation = resource_converter.create_panel_observation(
+      panel_masters[panel_name] = resource_converter.create_panel_observation(
           master_obs_id,
           patient_ref,
           collection_dt,
           panel_name,
           panel_data["loinc"],
-          member_refs,
+          panel_member_refs[panel_name],
       )
-      resources_to_bundle.append(master_observation)
 
-    for test in unpanelled_tests:
-      obs_id = str(uuid.uuid4())
-      diagnostic_report_result_refs.append(f"urn:uuid:{obs_id}")
+    # Second pass: create observations in original order, inserting panel
+    # master observations right after their last member test.
+    panels_emitted: set[str] = set()
+    for idx, test in enumerate(all_valid_tests):
+      obs_id = panel_obs_ids[id(test)]
 
       observation = resource_converter.create_lab_observation(
           test,
@@ -158,6 +167,16 @@ class AbdmLabReportFhirGenerator(fhir_generator.IFhirGenerator):
           organization_ref,
       )
       resources_to_bundle.append(observation)
+
+      # If this test belongs to a panel and is the last member, emit the
+      # master panel observation right after it.
+      if test.panel_name and test.panel_name in panels:
+        if idx == panel_last_test_idx.get(test.panel_name) and test.panel_name not in panels_emitted:
+          resources_to_bundle.append(panel_masters[test.panel_name])
+          panels_emitted.add(test.panel_name)
+      else:
+        # Unpanelled test — add directly to diagnostic report refs
+        diagnostic_report_result_refs.append(f"urn:uuid:{obs_id}")
 
     # Create single Diagnostic Report
     report_id = str(uuid.uuid4())
