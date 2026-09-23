@@ -88,11 +88,41 @@ class ExtractedObservation:
 
 
 @dataclass
+class ExtractedBillingItem:
+    """A single line-item from a hospital bill or invoice."""
+    description: str
+    quantity: int = 1
+    unit_price: float = 0.0
+    amount: float = 0.0
+    category: str = "General"  # e.g. Room & Board, Investigations, Pharmacy, etc.
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ExtractedBillingData:
+    """Complete billing/invoice data extracted from a hospital bill document."""
+    bill_number: str = ""
+    bill_date: str = ""
+    total_amount: float = 0.0
+    payment_mode: str = ""
+    items: list[ExtractedBillingItem] = field(default_factory=list)
+    source_document: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["items"] = [item.to_dict() for item in self.items]
+        return d
+
+
+@dataclass
 class ArchiveExtractionResult:
     """Complete aggregated extraction from all archive documents."""
     demographics: ExtractedDemographics = field(default_factory=ExtractedDemographics)
     documents: list[ExtractedDocumentInfo] = field(default_factory=list)
     observations: list[ExtractedObservation] = field(default_factory=list)
+    billing_data: list[ExtractedBillingData] = field(default_factory=list)
     clinical_notes: list[str] = field(default_factory=list)
     hospital_name: str | None = None
     treating_physician: str | None = None
@@ -102,6 +132,7 @@ class ArchiveExtractionResult:
             "demographics": self.demographics.to_dict(),
             "documents": [d.to_dict() for d in self.documents],
             "observations": [o.to_dict() for o in self.observations],
+            "billing_data": [b.to_dict() for b in self.billing_data],
             "clinical_notes": self.clinical_notes,
             "hospital_name": self.hospital_name,
             "treating_physician": self.treating_physician,
@@ -256,6 +287,24 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
       "source_document": "string"
     }}
   ],
+  "billing": [
+    {{
+      "bill_number": "string",
+      "bill_date": "string (DD/MM/YYYY or as printed)",
+      "total_amount": 0.0,
+      "payment_mode": "string (e.g. Cash, Insurance, Government Scheme)",
+      "items": [
+        {{
+          "description": "string (line-item description e.g. General Ward Charges, CBC, Imatinib 400mg)",
+          "quantity": 1,
+          "unit_price": 0.0,
+          "amount": 0.0,
+          "category": "string (Room & Board, Professional Fees, Investigations, Surgical / Procedures, Pharmacy / Medications, or General)"
+        }}
+      ],
+      "source_document": "string (filename)"
+    }}
+  ],
   "clinical_notes": ["string"],
   "hospital_name": "string or null",
   "treating_physician": "string or null"
@@ -408,7 +457,31 @@ def _merge_batch_results(
                 )
             )
 
-        # 4. Clinical notes & hospital/doctor
+        # 4. Billing data
+        for bill in r.get("billing", []) or []:
+            if not isinstance(bill, dict):
+                continue
+            items = []
+            for item in bill.get("items", []) or []:
+                if isinstance(item, dict) and item.get("description"):
+                    items.append(ExtractedBillingItem(
+                        description=item.get("description", ""),
+                        quantity=int(item.get("quantity", 1) or 1),
+                        unit_price=float(item.get("unit_price", 0) or 0),
+                        amount=float(item.get("amount", 0) or 0),
+                        category=item.get("category", "General"),
+                    ))
+            if items or bill.get("total_amount"):
+                merged.billing_data.append(ExtractedBillingData(
+                    bill_number=bill.get("bill_number", "") or "",
+                    bill_date=bill.get("bill_date", "") or "",
+                    total_amount=float(bill.get("total_amount", 0) or 0),
+                    payment_mode=bill.get("payment_mode", "") or "",
+                    items=items,
+                    source_document=bill.get("source_document", "") or "",
+                ))
+
+        # 5. Clinical notes & hospital/doctor
         for note in r.get("clinical_notes", []) or []:
             if note and note not in merged.clinical_notes:
                 merged.clinical_notes.append(note)
@@ -490,5 +563,6 @@ def process_archive_documents_with_gemini(
     log.info("  Address: %s", merged.demographics.address)
     log.info("  Total Classified Docs: %d", len(merged.documents))
     log.info("  Total Extracted Observations: %d", len(merged.observations))
+    log.info("  Total Extracted Bills: %d", len(merged.billing_data))
 
     return merged

@@ -62,6 +62,10 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
       )
   ]
 
+  claims = [
+      r for r in resources if r.get("resourceType") == "Claim"
+  ]
+
   profiles = []
   for resource in resources:
     for profile in resource.get("meta", {}).get("profile", []) or []:
@@ -81,6 +85,7 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
       },
       "patient": _summarize_patient(patient),
       "observations": [_summarize_observation(obs) for obs in observations],
+      "billing": [_summarize_claim(c) for c in claims],
   }
 
 
@@ -178,3 +183,76 @@ def _format_reference_ranges(ranges: list[dict[str, Any]]) -> str:
     elif low is not None or high is not None:
       values.append(f"{_display(low)} - {_display(high)} {unit}".strip())
   return "; ".join(values) if values else NOT_AVAILABLE
+
+
+def _summarize_claim(claim: dict[str, Any]) -> dict[str, Any]:
+  """Summarizes a FHIR Claim resource into a display-friendly dict."""
+  total = claim.get("total", {})
+  total_amount = total.get("value", 0) if isinstance(total, dict) else 0
+  currency = total.get("currency", "INR") if isinstance(total, dict) else "INR"
+
+  # Extract bill number from identifier
+  bill_number = ""
+  for ident in claim.get("identifier", []) or []:
+    if isinstance(ident, dict) and ident.get("value"):
+      bill_number = ident["value"]
+      break
+
+  # Extract bill date, payment mode, source from supportingInfo
+  bill_date = ""
+  payment_mode = ""
+  source_document = ""
+  for info in claim.get("supportingInfo", []) or []:
+    if isinstance(info, dict):
+      val = info.get("valueString", "")
+      for part in val.split(" | "):
+        if part.startswith("Bill Date:"):
+          bill_date = part.replace("Bill Date:", "").strip()
+        elif part.startswith("Payment Mode:"):
+          payment_mode = part.replace("Payment Mode:", "").strip()
+        elif part.startswith("Source document:"):
+          source_document = part.replace("Source document:", "").strip()
+
+  # Extract line items
+  items = []
+  for item in claim.get("item", []) or []:
+    if not isinstance(item, dict):
+      continue
+    desc = ""
+    pos = item.get("productOrService", {})
+    if isinstance(pos, dict):
+      desc = pos.get("text", "") or ""
+    qty = 1
+    q = item.get("quantity", {})
+    if isinstance(q, dict):
+      qty = q.get("value", 1) or 1
+    up = 0
+    u = item.get("unitPrice", {})
+    if isinstance(u, dict):
+      up = u.get("value", 0) or 0
+    amt = 0
+    n = item.get("net", {})
+    if isinstance(n, dict):
+      amt = n.get("value", 0) or 0
+    cat = "General"
+    c = item.get("category", {})
+    if isinstance(c, dict):
+      cat = c.get("text", "General") or "General"
+
+    items.append({
+        "description": desc,
+        "quantity": qty,
+        "unit_price": up,
+        "amount": amt,
+        "category": cat,
+    })
+
+  return {
+      "bill_number": _display(bill_number),
+      "bill_date": _display(bill_date),
+      "total_amount": total_amount,
+      "currency": currency,
+      "payment_mode": _display(payment_mode),
+      "source_document": _display(source_document),
+      "items": items,
+  }

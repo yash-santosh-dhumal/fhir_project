@@ -351,6 +351,111 @@ def _build_observation_resource(
     return resource
 
 
+def _build_claim_resource(
+    billing: Any,
+    patient_ref: str,
+    organization_ref: str,
+) -> dict[str, Any]:
+    """Constructs a FHIR Claim resource from extracted billing data."""
+    b = billing.to_dict() if hasattr(billing, "to_dict") else (billing or {})
+    claim_id = str(uuid.uuid4())
+
+    items_list = b.get("items", []) or []
+    fhir_items = []
+    for seq, item in enumerate(items_list, 1):
+        desc = item.get("description", "Charge")
+        qty = item.get("quantity", 1) or 1
+        unit_price = float(item.get("unit_price", 0) or 0)
+        amount = float(item.get("amount", 0) or 0)
+        category = item.get("category", "General")
+
+        fhir_item: dict[str, Any] = {
+            "sequence": seq,
+            "productOrService": {
+                "text": desc,
+            },
+            "quantity": {"value": qty},
+            "unitPrice": {
+                "value": unit_price,
+                "currency": "INR",
+            },
+            "net": {
+                "value": amount,
+                "currency": "INR",
+            },
+            "category": {
+                "text": category,
+            },
+        }
+        fhir_items.append(fhir_item)
+
+    total_amount = float(b.get("total_amount", 0) or 0)
+    bill_number = b.get("bill_number", "") or ""
+    bill_date = b.get("bill_date", "") or ""
+    payment_mode = b.get("payment_mode", "") or ""
+    src_doc = b.get("source_document", "") or ""
+
+    claim: dict[str, Any] = {
+        "resourceType": "Claim",
+        "id": claim_id,
+        "status": "active",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                    "code": "institutional",
+                    "display": "Institutional",
+                }
+            ]
+        },
+        "use": "claim",
+        "patient": {"reference": patient_ref},
+        "provider": {"reference": organization_ref},
+        "priority": {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/processpriority",
+                    "code": "normal",
+                }
+            ]
+        },
+        "total": {
+            "value": total_amount,
+            "currency": "INR",
+        },
+        "item": fhir_items,
+    }
+
+    # Add bill identifiers as extensions / notes
+    notes = []
+    if bill_number:
+        claim["identifier"] = [{
+            "system": "http://hospital.local/bill-number",
+            "value": bill_number,
+        }]
+        notes.append(f"Bill Number: {bill_number}")
+    if bill_date:
+        notes.append(f"Bill Date: {bill_date}")
+    if payment_mode:
+        notes.append(f"Payment Mode: {payment_mode}")
+    if src_doc:
+        notes.append(f"Source document: {src_doc}")
+    if notes:
+        claim["supportingInfo"] = [{
+            "sequence": 1,
+            "category": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/claiminformationcategory",
+                    "code": "info",
+                    "display": "Information",
+                }]
+            },
+            "valueString": " | ".join(notes),
+        }]
+
+    return claim
+
+
 def unify_patient_bundles(
     bundles: list[dict[str, Any]],
     archive_filename: str = "patient_archive.zip",
@@ -541,7 +646,32 @@ def unify_patient_bundles(
                 },
             })
 
-    # 7. Add Archive Document Manifest Section if available
+    # 7. Add Billing / Claims Section if available
+    all_claims: list[dict[str, Any]] = []
+    if gemini_extraction and getattr(gemini_extraction, "billing_data", None):
+        claim_refs: list[dict[str, str]] = []
+        for bill in gemini_extraction.billing_data:
+            claim_res = _build_claim_resource(bill, patient_ref, organization_ref)
+            all_claims.append(claim_res)
+            claim_refs.append({"reference": f"urn:uuid:{claim_res['id']}"})
+
+        if claim_refs:
+            sections.append({
+                "title": "Billing & Financial Records",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://loinc.org",
+                            "code": "64297-5",
+                            "display": "Death certificate",  # closest generic billing code
+                        }
+                    ],
+                    "text": "Billing & Financial Records",
+                },
+                "entry": claim_refs,
+            })
+
+    # 8. Add Archive Document Manifest Section if available
     if gemini_extraction and getattr(gemini_extraction, "documents", None):
         manifest_items = []
         for d in gemini_extraction.documents:
@@ -709,6 +839,12 @@ def unify_patient_bundles(
         bundle_entries.append({
             "fullUrl": f"urn:uuid:{obs['id']}",
             "resource": obs,
+        })
+
+    for claim in all_claims:
+        bundle_entries.append({
+            "fullUrl": f"urn:uuid:{claim['id']}",
+            "resource": claim,
         })
 
     master_bundle = {

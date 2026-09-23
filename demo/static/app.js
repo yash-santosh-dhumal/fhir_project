@@ -1099,6 +1099,9 @@ async function viewPatient(patientId) {
         bundleObs = observations.filter((o) => !o.bundle_id || o.bundle_id === selectedBundle.id);
       }
 
+      // Gather claims/billing data for this bundle
+      const bundleClaims = resources.filter((r) => r.resourceType === "Claim");
+
       // Check if blood group can also be found in bundleObs
       if (!pBloodGroup) {
         bundleObs.forEach((o) => {
@@ -1317,6 +1320,103 @@ async function viewPatient(patientId) {
       }
 
 
+      // Build Billing Section HTML from Claim resources
+      let billingSectionHtml = "";
+      if (bundleClaims.length > 0) {
+        const billCards = bundleClaims.map((claim) => {
+          // Extract bill metadata
+          const billNum = claim.identifier?.[0]?.value || "";
+          const totalVal = claim.total?.value || 0;
+          const currency = claim.total?.currency || "INR";
+          let billDate = "";
+          let paymentMode = "";
+          let srcDoc = "";
+          (claim.supportingInfo || []).forEach((si) => {
+            const val = si.valueString || "";
+            val.split(" | ").forEach((part) => {
+              if (part.startsWith("Bill Date:")) billDate = part.replace("Bill Date:", "").trim();
+              else if (part.startsWith("Payment Mode:")) paymentMode = part.replace("Payment Mode:", "").trim();
+              else if (part.startsWith("Source document:")) srcDoc = part.replace("Source document:", "").trim();
+            });
+          });
+
+          // Group items by category
+          const items = claim.item || [];
+          const catGroups = {};
+          items.forEach((it) => {
+            const cat = it.category?.text || "General";
+            if (!catGroups[cat]) catGroups[cat] = [];
+            catGroups[cat].push(it);
+          });
+
+          // Build item rows
+          let itemRowsHtml = "";
+          let seq = 0;
+          Object.entries(catGroups).forEach(([catName, catItems]) => {
+            itemRowsHtml += `<tr style="background:rgba(99,102,241,0.08)"><td colspan="5" style="font-weight:700;font-size:0.78rem;padding:6px 10px;color:#a5b4fc;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(catName)}</td></tr>`;
+            catItems.forEach((it) => {
+              seq++;
+              const desc = it.productOrService?.text || "Charge";
+              const qty = it.quantity?.value || 1;
+              const unitP = it.unitPrice?.value || 0;
+              const net = it.net?.value || 0;
+              itemRowsHtml += `
+                <tr>
+                  <td style="text-align:center;color:var(--text-muted);font-size:0.76rem">${seq}</td>
+                  <td style="font-size:0.8rem">${escapeHtml(desc)}</td>
+                  <td style="text-align:center;font-size:0.8rem">${qty}</td>
+                  <td style="text-align:right;font-size:0.8rem">₹${Number(unitP).toLocaleString("en-IN")}</td>
+                  <td style="text-align:right;font-size:0.8rem;font-weight:600">₹${Number(net).toLocaleString("en-IN")}</td>
+                </tr>`;
+            });
+          });
+
+          return `
+            <div class="report-clinical-section" style="margin-top:16px">
+              <div class="clinical-section-header">
+                <div class="clinical-section-title-wrap">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
+                  </svg>
+                  <h4>Hospital Billing &amp; Financial Record</h4>
+                </div>
+                <span class="manifest-badge" style="background:rgba(34,197,94,0.15);color:#86efac;border-color:rgba(34,197,94,0.3)">FHIR Claim Resource</span>
+              </div>
+
+              <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+                ${billNum ? `<div style="background:var(--bg-input);padding:6px 14px;border-radius:6px;border:1px solid var(--border);font-size:0.78rem"><strong style="color:var(--text-muted)">Bill No:</strong> <span style="color:var(--text-primary)">${escapeHtml(billNum)}</span></div>` : ""}
+                ${billDate ? `<div style="background:var(--bg-input);padding:6px 14px;border-radius:6px;border:1px solid var(--border);font-size:0.78rem"><strong style="color:var(--text-muted)">Date:</strong> <span style="color:var(--text-primary)">${escapeHtml(billDate)}</span></div>` : ""}
+                ${paymentMode ? `<div style="background:var(--bg-input);padding:6px 14px;border-radius:6px;border:1px solid var(--border);font-size:0.78rem"><strong style="color:var(--text-muted)">Payment:</strong> <span style="color:var(--text-primary)">${escapeHtml(paymentMode)}</span></div>` : ""}
+                ${srcDoc ? `<div style="background:var(--bg-input);padding:6px 14px;border-radius:6px;border:1px solid var(--border);font-size:0.78rem"><strong style="color:var(--text-muted)">Source:</strong> <span style="color:var(--text-primary)">📄 ${escapeHtml(srcDoc)}</span></div>` : ""}
+              </div>
+
+              <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+                  <thead>
+                    <tr style="background:rgba(99,102,241,0.18);color:#c7d2fe">
+                      <th style="padding:8px 10px;text-align:center;width:40px;font-size:0.72rem">#</th>
+                      <th style="padding:8px 10px;text-align:left;font-size:0.72rem">DESCRIPTION</th>
+                      <th style="padding:8px 10px;text-align:center;width:50px;font-size:0.72rem">QTY</th>
+                      <th style="padding:8px 10px;text-align:right;width:90px;font-size:0.72rem">RATE</th>
+                      <th style="padding:8px 10px;text-align:right;width:100px;font-size:0.72rem">AMOUNT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${itemRowsHtml}
+                  </tbody>
+                  <tfoot>
+                    <tr style="background:rgba(34,197,94,0.1);border-top:2px solid rgba(34,197,94,0.3)">
+                      <td colspan="4" style="padding:10px;text-align:right;font-weight:700;font-size:0.88rem;color:#86efac;text-transform:uppercase">Grand Total</td>
+                      <td style="padding:10px;text-align:right;font-weight:800;font-size:1rem;color:#4ade80">${currency} ${Number(totalVal).toLocaleString("en-IN")}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>`;
+        }).join("");
+
+        billingSectionHtml = billCards;
+      }
 
 
       // Multi-bundle selector
@@ -1494,6 +1594,9 @@ async function viewPatient(patientId) {
 
           <!-- Clinical Diagnoses & Treatment Section -->
           ${clinicalSectionHtml}
+
+          <!-- Billing & Financial Records Section -->
+          ${billingSectionHtml}
 
           <!-- Observations Section Header & Filter Toolbar -->
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
