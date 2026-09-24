@@ -33,10 +33,10 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-GEMINI_MODEL = os.environ.get("GEMINI_OCR_MODEL", "gemini-3.1-flash-lite")
-MAX_BATCH_SIZE = 6
-MAX_WORKERS = 3
-MAX_RETRIES = 3
+GEMINI_MODEL = os.environ.get("GEMINI_OCR_MODEL", "gemini-3.5-flash-lite")
+MAX_BATCH_SIZE = int(os.environ.get("GEMINI_OCR_BATCH_SIZE", "5"))
+MAX_WORKERS = int(os.environ.get("GEMINI_OCR_MAX_WORKERS", "8"))
+MAX_RETRIES = int(os.environ.get("GEMINI_OCR_MAX_RETRIES", "3"))
 
 
 @dataclass
@@ -117,12 +117,35 @@ class ExtractedBillingData:
 
 
 @dataclass
+class ExtractedInsurancePolicy:
+    """Insurance policy / pre-authorization schedule data extracted from insurance documents."""
+    policy_number: str = ""
+    scheme_or_insurer: str = ""
+    health_card_number: str = ""
+    claim_or_preauth_number: str = ""
+    policy_status: str = "Active"
+    annual_sum_insured: float = 0.0
+    copayment_liability: float = 0.0          # Flat copay/deductible, e.g. 0.0
+    copayment_percentage: float = 0.0         # Co-pay percentage if applicable
+    coverage_type: str = ""                   # Cashless, Floater, etc.
+    pre_auth_approved_amount: float = 0.0     # Trust/Insurer Approved Amount
+    patient_out_of_pocket: float = 0.0        # Patient Liability stated in document
+    covered_categories: list[str] = field(default_factory=list)
+    terms_and_rules: str = ""
+    source_document: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class ArchiveExtractionResult:
     """Complete aggregated extraction from all archive documents."""
     demographics: ExtractedDemographics = field(default_factory=ExtractedDemographics)
     documents: list[ExtractedDocumentInfo] = field(default_factory=list)
     observations: list[ExtractedObservation] = field(default_factory=list)
     billing_data: list[ExtractedBillingData] = field(default_factory=list)
+    insurance_policy: ExtractedInsurancePolicy | None = None
     clinical_notes: list[str] = field(default_factory=list)
     hospital_name: str | None = None
     treating_physician: str | None = None
@@ -133,6 +156,7 @@ class ArchiveExtractionResult:
             "documents": [d.to_dict() for d in self.documents],
             "observations": [o.to_dict() for o in self.observations],
             "billing_data": [b.to_dict() for b in self.billing_data],
+            "insurance_policy": self.insurance_policy.to_dict() if self.insurance_policy else None,
             "clinical_notes": self.clinical_notes,
             "hospital_name": self.hospital_name,
             "treating_physician": self.treating_physician,
@@ -250,6 +274,20 @@ Carefully extract:
    - interpretation: "normal", "high", "low", or "abnormal"
    - source_document: filename where this test was found
 4. Hospital / Clinic Name & Treating Physician (if visible anywhere in these documents).
+5. Insurance Policy / Health Insurance Claim / Pre-Authorization Document (if any document is a health insurance certificate, policy schedule, PM-JAY/Aarogyasri card, or pre-authorization claim settlement):
+   - policy_number: official policy / card / health schedule number (e.g. "WAP138200500121/04")
+   - scheme_or_insurer: scheme or insurer name (e.g. "Dr. YSR Aarogyasri / AB-PMJAY")
+   - health_card_number: health card ID
+   - claim_or_preauth_number: pre-authorization claim reference number (e.g. "APTRUST/KNL/2025/1/13510681/07")
+   - policy_status: policy status (e.g. "ACTIVE / IN-FORCE")
+   - annual_sum_insured: total family floater or annual limit in numeric rupees (e.g. 2500000.0 or 500000.0)
+   - copayment_liability: beneficiary copayment or deductible as a SPECIFIC RUPEE AMOUNT stated in the document (e.g. 8592.0). Set to 0.0 if the document only mentions a percentage (like 20%) without a specific rupee figure, or if NIL / Cashless
+   - copayment_percentage: copay percentage if specified (e.g. 20.0 for "20% co-payment", 0.0 if NIL / 100% cashless)
+   - coverage_type: e.g. "Cashless Government Health Assurance Floater" or "Co-Pay Health Assurance Scheme (80:20 Risk-Sharing)"
+   - pre_auth_approved_amount: SPECIFIC RUPEE amount approved / sanctioned by trust or insurer for THIS patient's claim (e.g. 42962.0 or 70473.0). Set to 0.0 if the document does NOT mention a specific claim settlement amount — many policy documents only describe general coverage rules without specifying exact patient-specific claim amounts
+   - patient_out_of_pocket: SPECIFIC RUPEE amount the patient must pay as stated in the document (e.g. 8592.0). Set to 0.0 if no specific rupee figure is mentioned — the system will automatically calculate this from the bill and copayment_percentage
+   - covered_categories: list of covered benefit heads / treatment types that the policy covers (e.g. ["Room & Board", "Professional Fees", "Investigations", "Surgical / Procedures", "Pharmacy / Medications", "ICU & Critical Care", "Oncology", "Day Care Treatment"]). Extract ALL covered treatment categories mentioned in the policy document
+   - terms_and_rules: concise policy coverage statement including the cost-sharing rule (e.g. "80% insurer underwritten, 20% beneficiary co-payment" or "100% cashless treatment with NIL co-payment"). Include the coverage percentage split if mentioned
 
 OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
 {{
@@ -305,6 +343,22 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
       "source_document": "string (filename)"
     }}
   ],
+  "insurance_policy": {{
+    "policy_number": "string",
+    "scheme_or_insurer": "string",
+    "health_card_number": "string or null",
+    "claim_or_preauth_number": "string",
+    "policy_status": "Active",
+    "annual_sum_insured": 0.0,
+    "copayment_liability": 0.0,
+    "copayment_percentage": 0.0,
+    "coverage_type": "string",
+    "pre_auth_approved_amount": 0.0,
+    "patient_out_of_pocket": 0.0,
+    "covered_categories": ["string"],
+    "terms_and_rules": "string",
+    "source_document": "string (filename)"
+  }},
   "clinical_notes": ["string"],
   "hospital_name": "string or null",
   "treating_physician": "string or null"
@@ -325,11 +379,7 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
                 ),
             )
             raw_text = resp.text.strip()
-            # Clean possible markdown wrapping
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```json\s*", "", raw_text)
-                raw_text = re.sub(r"```$", "", raw_text).strip()
-            return json.loads(raw_text)
+            return _clean_and_parse_json(raw_text)
         except Exception as exc:
             last_err = exc
             log.warning("Batch %d attempt %d failed: %s", batch_index, attempt + 1, exc)
@@ -339,6 +389,51 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
 
     log.error("Batch %d failed completely after %d attempts: %s", batch_index, MAX_RETRIES, last_err)
     return {}
+
+
+def _clean_and_parse_json(raw_text: str) -> dict[str, Any]:
+    """Robust JSON parser that sanitizes markdown blocks, trailing commas, and boundary issues."""
+    if not raw_text:
+        return {}
+
+    # 1. Clean markdown wrapping
+    if "```" in raw_text:
+        match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw_text, re.DOTALL)
+        if match:
+            raw_text = match.group(1).strip()
+        else:
+            raw_text = re.sub(r"^```json\s*", "", raw_text)
+            raw_text = re.sub(r"```\s*$", "", raw_text).strip()
+
+    # 2. Extract outermost JSON object boundary
+    if "{" in raw_text:
+        first_brace = raw_text.find("{")
+        last_brace = raw_text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            raw_text = raw_text[first_brace : last_brace + 1]
+
+    # 3. Direct parse attempt
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        pass
+
+    # 4. Clean trailing commas before closing braces/brackets (e.g. [1, 2,] or {a: 1,})
+    cleaned = re.sub(r",\s*([\}\]])", r"\1", raw_text)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # 5. Add missing quotes to unquoted property keys (e.g. { name: "val" })
+    cleaned_keys = re.sub(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r' "\1":', cleaned)
+    try:
+        return json.loads(cleaned_keys)
+    except Exception:
+        pass
+
+    # Re-attempt with standard parser to propagate informative error if truly unparseable
+    return json.loads(raw_text)
 
 
 def _normalize_birth_date(dob_str: str | None) -> str | None:
@@ -481,7 +576,46 @@ def _merge_batch_results(
                     source_document=bill.get("source_document", "") or "",
                 ))
 
-        # 5. Clinical notes & hospital/doctor
+        # 5. Insurance Policy data
+        ip = r.get("insurance_policy")
+        if isinstance(ip, dict) and (ip.get("policy_number") or ip.get("scheme_or_insurer") or ip.get("annual_sum_insured")):
+            ip_src = str(ip.get("source_document") or "").lower()
+            is_dedicated = any(k in ip_src for k in ("insurance_policy", "demo claims", "policy_document", "claim"))
+            curr_src = (merged.insurance_policy.source_document or "").lower() if merged.insurance_policy else ""
+            curr_is_dedicated = any(k in curr_src for k in ("insurance_policy", "demo claims", "policy_document"))
+            curr_appr = merged.insurance_policy.pre_auth_approved_amount if merged.insurance_policy else 0.0
+            new_appr = float(ip.get("pre_auth_approved_amount", 0) or 0)
+            has_copay = float(ip.get("copayment_percentage", 0) or 0) > 0 or float(ip.get("patient_out_of_pocket", 0) or 0) > 0
+
+            should_update = False
+            if not merged.insurance_policy:
+                should_update = True
+            elif is_dedicated:
+                should_update = True
+            elif not curr_is_dedicated and has_copay:
+                should_update = True
+            elif not curr_is_dedicated and new_appr >= curr_appr:
+                should_update = True
+
+            if should_update:
+                merged.insurance_policy = ExtractedInsurancePolicy(
+                    policy_number=str(ip.get("policy_number") or "").strip(),
+                    scheme_or_insurer=str(ip.get("scheme_or_insurer") or "").strip(),
+                    health_card_number=str(ip.get("health_card_number") or "").strip(),
+                    claim_or_preauth_number=str(ip.get("claim_or_preauth_number") or "").strip(),
+                    policy_status=str(ip.get("policy_status") or "Active").strip(),
+                    annual_sum_insured=float(ip.get("annual_sum_insured", 0) or 0),
+                    copayment_liability=float(ip.get("copayment_liability", 0) or 0),
+                    copayment_percentage=float(ip.get("copayment_percentage", 0) or 0),
+                    coverage_type=str(ip.get("coverage_type") or "").strip(),
+                    pre_auth_approved_amount=new_appr,
+                    patient_out_of_pocket=float(ip.get("patient_out_of_pocket", 0) or 0),
+                    covered_categories=ip.get("covered_categories", []) or [],
+                    terms_and_rules=str(ip.get("terms_and_rules") or "").strip(),
+                    source_document=str(ip.get("source_document") or "").strip(),
+                )
+
+        # 6. Clinical notes & hospital/doctor
         for note in r.get("clinical_notes", []) or []:
             if note and note not in merged.clinical_notes:
                 merged.clinical_notes.append(note)
@@ -490,6 +624,16 @@ def _merge_batch_results(
             merged.hospital_name = r["hospital_name"]
         if r.get("treating_physician") and not merged.treating_physician:
             merged.treating_physician = r["treating_physician"]
+
+    # Filter billing data: if a demo bill is present, consider only the demo bill as the final bill
+    demo_bills = [
+        b for b in merged.billing_data
+        if "demo bill" in (b.source_document or "").lower()
+        or "demo_bill" in (b.source_document or "").lower()
+        or "hospital_bill" in (b.source_document or "").lower()
+    ]
+    if demo_bills:
+        merged.billing_data = demo_bills
 
     return merged
 
@@ -500,13 +644,17 @@ def process_archive_documents_with_gemini(
 ) -> ArchiveExtractionResult:
     """Runs high-level OCR and information extraction on ALL archive documents.
 
+    Separates clinical text documents from non-text visual evidence photos to
+    eliminate unnecessary vision model calls, and extracts priority financial
+    documents (hospital bill and insurance policy) in a dedicated fast batch.
+
     Args:
         documents: List of ArchiveDocument objects extracted from the ZIP archive.
         batch_size: Number of documents to send per Gemini API call.
 
     Returns:
         ArchiveExtractionResult containing demographics, document classification,
-        observations, and clinical notes.
+        observations, billing, and insurance policy data.
     """
     if not documents:
         return ArchiveExtractionResult()
@@ -514,19 +662,47 @@ def process_archive_documents_with_gemini(
     client = _get_gemini_client()
     log.info("Starting Gemini high-level OCR on %d documents...", len(documents))
 
-    # Prepare document tuples
-    doc_tuples = [
-        (doc.filename, doc.relative_path, doc.file_bytes, doc.mime_type)
-        for doc in documents
-    ]
+    # Separate clinical text documents from non-text visual evidence photos
+    text_docs = [d for d in documents if getattr(d, "is_clinical_text_document", True)]
+    visual_docs = [d for d in documents if not getattr(d, "is_clinical_text_document", True)]
+    log.info("Processing %d clinical text documents with Gemini vision (skipping %d non-text visual evidence photos)...",
+             len(text_docs), len(visual_docs))
 
-    # Chunk into batches
+    # Separate priority financial documents (bill and insurance claim) to guarantee fast & exact extraction
+    priority_financial_docs: list[Any] = []
+    regular_clinical_docs: list[Any] = []
+    for d in text_docs:
+        rel_lower = d.relative_path.lower()
+        if (
+            "demo bill" in rel_lower
+            or "demo claims" in rel_lower
+            or "hospital_bill" in rel_lower
+            or "insurance_policy" in rel_lower
+        ):
+            priority_financial_docs.append(d)
+        else:
+            regular_clinical_docs.append(d)
+
+    # Prepare batch tuples: (filename, relative_path, file_bytes, mime_type)
     batches: list[list[tuple[str, str, bytes, str]]] = []
-    for i in range(0, len(doc_tuples), batch_size):
-        batches.append(doc_tuples[i : i + batch_size])
 
-    log.info("Divided %d documents into %d batches (batch_size=%d)",
-             len(documents), len(batches), batch_size)
+    # Priority batch (Financial: Bill + Insurance Policy)
+    if priority_financial_docs:
+        batches.append([
+            (doc.filename, doc.relative_path, doc.file_bytes, doc.mime_type)
+            for doc in priority_financial_docs
+        ])
+
+    # Regular clinical batches chunked by batch_size
+    reg_tuples = [
+        (doc.filename, doc.relative_path, doc.file_bytes, doc.mime_type)
+        for doc in regular_clinical_docs
+    ]
+    for i in range(0, len(reg_tuples), batch_size):
+        batches.append(reg_tuples[i : i + batch_size])
+
+    log.info("Divided %d clinical text documents into %d parallel batches (max_workers=%d)",
+             len(text_docs), len(batches), min(MAX_WORKERS, len(batches)))
 
     results: list[dict[str, Any]] = [None] * len(batches)  # type: ignore
 
@@ -549,20 +725,55 @@ def process_archive_documents_with_gemini(
                 results[idx] = {}
 
     elapsed = round(time.perf_counter() - start_time, 2)
-    log.info("Gemini high-level OCR on %d documents finished in %.2fs", len(documents), elapsed)
+    log.info("Gemini high-level OCR on %d documents finished in %.2fs", len(text_docs), elapsed)
 
     merged = _merge_batch_results(
         [r for r in results if r],
-        [d.relative_path for d in documents],
+        [d.relative_path for d in text_docs],
     )
+
+    # Reconstruct merged.documents in the original order of all archive documents,
+    # ensuring visual evidence photos are clearly classified without omission.
+    doc_map = {d.relative_path: d for d in merged.documents}
+    ordered_docs: list[ExtractedDocumentInfo] = []
+    for d in documents:
+        if d.relative_path in doc_map:
+            ordered_docs.append(doc_map[d.relative_path])
+        else:
+            fn_lower = d.filename.lower()
+            fp_lower = d.relative_path.lower()
+            if any(k in fn_lower for k in ("qr", "emblem")):
+                doc_type = "Administrative Asset / QR Code"
+            elif any(k in fn_lower for k in ("photo", "selfie", "portrait")):
+                doc_type = "Patient Identification / Photo Evidence"
+            elif "page_" in fn_lower:
+                doc_type = "Insurance Policy Page (Pre-Rendered Image)"
+            elif any(k in fp_lower for k in ("ward", "bed", "surgery", "intra op")):
+                doc_type = "Ward / Treatment Visual Evidence"
+            else:
+                doc_type = "Visual Evidence / Clinical Photo"
+
+            ordered_docs.append(
+                ExtractedDocumentInfo(
+                    filename=d.filename,
+                    relative_path=d.relative_path,
+                    document_type=doc_type,
+                    summary=f"Visual evidence photo ({d.mime_type})",
+                    clinical_notes=[],
+                )
+            )
+    merged.documents = ordered_docs
 
     log.info("Extraction summary:")
     log.info("  Patient Name: %s", merged.demographics.name)
     log.info("  DOB: %s | Gender: %s", merged.demographics.birth_date, merged.demographics.gender)
     log.info("  Aadhaar: %s", merged.demographics.aadhaar_number)
     log.info("  Address: %s", merged.demographics.address)
-    log.info("  Total Classified Docs: %d", len(merged.documents))
+    log.info("  Total Classified Docs: %d (all %d archive entries)", len(merged.documents), len(documents))
     log.info("  Total Extracted Observations: %d", len(merged.observations))
     log.info("  Total Extracted Bills: %d", len(merged.billing_data))
+    if merged.insurance_policy:
+        log.info("  Extracted Insurance Policy: %s (%s)",
+                 merged.insurance_policy.policy_number, merged.insurance_policy.scheme_or_insurer)
 
     return merged

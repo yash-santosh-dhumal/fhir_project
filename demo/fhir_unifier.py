@@ -39,6 +39,10 @@ ABDM_OBSERVATION_PROFILE = (
 ABDM_DOCUMENT_BUNDLE_PROFILE = (
     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentBundle"
 )
+ABDM_COVERAGE_PROFILE = "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Coverage"
+ABDM_CLAIM_RESPONSE_PROFILE = (
+    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClaimResponse"
+)
 
 _LOINC_CACHE: dict[str, tuple[str, str]] | None = None
 
@@ -456,6 +460,460 @@ def _build_claim_resource(
     return claim
 
 
+def _build_coverage_resource(
+    policy: Any,
+    patient_ref: str,
+    organization_ref: str,
+) -> dict[str, Any]:
+    """Constructs a normative FHIR R4 Coverage resource from extracted insurance policy data."""
+    cov_id = str(uuid.uuid4())
+    scheme_name = getattr(policy, "scheme_or_insurer", "") or "Health Insurance Scheme"
+    policy_num = getattr(policy, "policy_number", "") or getattr(policy, "health_card_number", "") or "N/A"
+    cov_type = getattr(policy, "coverage_type", "") or "Cashless Health Insurance"
+    sum_ins = float(getattr(policy, "annual_sum_insured", 0.0) or 0.0)
+    copay = float(getattr(policy, "copayment_liability", 0.0) or 0.0)
+    copay_pct = float(getattr(policy, "copayment_percentage", 0.0) or 0.0)
+    covered_cats = getattr(policy, "covered_categories", []) or []
+    terms = getattr(policy, "terms_and_rules", "") or ""
+
+    is_public = any(k in scheme_name.lower() for k in ("gov", "pmjay", "aarogyasri", "trust", "yojana"))
+
+    cov: dict[str, Any] = {
+        "resourceType": "Coverage",
+        "id": cov_id,
+        "meta": {
+            "profile": [ABDM_COVERAGE_PROFILE],
+        },
+        "status": "active",
+        "type": {
+            "coding": [{
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                "code": "PUBLICPOL" if is_public else "HIP",
+                "display": cov_type,
+            }],
+            "text": f"{scheme_name} ({cov_type})",
+        },
+        "beneficiary": {"reference": patient_ref},
+        "payor": [{
+            "reference": organization_ref,
+            "display": scheme_name,
+        }],
+        "subscriberId": policy_num,
+    }
+
+    if policy_num and policy_num != "N/A":
+        cov["identifier"] = [{
+            "system": "https://healthid.ndhm.gov.in/policy",
+            "value": policy_num,
+        }]
+
+    # Cost to beneficiary (Copayment / Deductible)
+    cov["costToBeneficiary"] = [{
+        "type": {
+            "coding": [{
+                "system": "http://terminology.hl7.org/CodeSystem/coverage-copay-type",
+                "code": "copay",
+                "display": "Co-payment / Deductible",
+            }]
+        },
+        "valueMoney": {
+            "value": copay,
+            "currency": "INR",
+        }
+    }]
+
+    # Class (Plan details, sum insured, and policy metadata for reconstruction)
+    classes = [{
+        "type": {
+            "coding": [{
+                "system": "http://terminology.hl7.org/CodeSystem/coverage-class",
+                "code": "plan",
+                "display": "Insurance Plan / Scheme",
+            }]
+        },
+        "value": policy_num,
+        "name": f"{scheme_name} ({cov_type})",
+    }]
+    if sum_ins > 0:
+        classes.append({
+            "type": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/coverage-class",
+                    "code": "sum_insured",
+                    "display": "Sum Insured Limit",
+                }]
+            },
+            "value": str(sum_ins),
+            "name": "Annual Family Floater Sum Insured",
+        })
+    if copay_pct > 0:
+        classes.append({
+            "type": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/coverage-class",
+                    "code": "copay_percentage",
+                    "display": "Co-Payment Percentage",
+                }]
+            },
+            "value": str(copay_pct),
+            "name": f"{copay_pct}% Beneficiary Co-Payment",
+        })
+    if covered_cats:
+        classes.append({
+            "type": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/coverage-class",
+                    "code": "covered_categories",
+                    "display": "Covered Treatment Categories",
+                }]
+            },
+            "value": ", ".join(covered_cats),
+            "name": "Covered Benefit Heads",
+        })
+    if terms:
+        classes.append({
+            "type": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/coverage-class",
+                    "code": "terms_and_rules",
+                    "display": "Policy Terms & Coverage Rules",
+                }]
+            },
+            "value": terms,
+            "name": "Insurance Policy Terms",
+        })
+    cov["class"] = classes
+
+    return cov
+
+
+def _adjudicate_bill_against_policy(
+    bills: list[Any],
+    policy: Any,
+) -> dict[str, Any]:
+    """Calculates insured amount vs patient out-of-pocket payable by cross-referencing bill and policy.
+
+    Handles both insurance documents that specify exact rupee amounts AND
+    documents that only describe coverage rules/categories without amounts.
+    When exact amounts are missing, automatically calculates from the bill
+    using copayment percentage and covered category matching.
+    """
+    # Prioritize demo bill if present, per requirement: "from the demo bill how much amount is insured"
+    demo_bills = [
+        b for b in bills 
+        if "demo bill" in (getattr(b, "source_document", "") or "").lower()
+        or "demo_bill" in (getattr(b, "source_document", "") or "").lower()
+        or "hospital_bill" in (getattr(b, "source_document", "") or "").lower()
+    ]
+    target_bills = demo_bills if demo_bills else bills
+
+    total_billed = 0.0
+    bill_items_by_category: dict[str, float] = {}
+    for b in target_bills:
+        amt = float(getattr(b, "total_amount", 0.0) or 0.0)
+        if amt > 0:
+            total_billed += amt
+        items = getattr(b, "items", []) or []
+        if not amt and items:
+            total_billed += sum(float(getattr(it, "amount", 0.0) or 0.0) for it in items)
+        for it in items:
+            cat = (getattr(it, "category", "") or "General").strip()
+            item_amt = float(getattr(it, "amount", 0.0) or 0.0)
+            bill_items_by_category[cat] = bill_items_by_category.get(cat, 0.0) + item_amt
+
+    pre_auth_appr = float(getattr(policy, "pre_auth_approved_amount", 0.0) or 0.0)
+    policy_patient_oop = float(getattr(policy, "patient_out_of_pocket", 0.0) or 0.0)
+    copay_liab = float(getattr(policy, "copayment_liability", 0.0) or 0.0)
+    copay_pct = float(getattr(policy, "copayment_percentage", 0.0) or 0.0)
+    sum_insured = float(getattr(policy, "annual_sum_insured", 0.0) or 0.0)
+    cov_type = (getattr(policy, "coverage_type", "") or "").lower()
+    terms_text = (getattr(policy, "terms_and_rules", "") or "").lower()
+    scheme = getattr(policy, "scheme_or_insurer", "") or "Insurance Policy"
+    policy_num = getattr(policy, "policy_number", "") or "N/A"
+    preauth_num = getattr(policy, "claim_or_preauth_number", "") or ""
+    covered_categories = getattr(policy, "covered_categories", []) or []
+
+    # Normalize copay_liab: if it looks like a ratio/percentage (< 100) rather than
+    # an actual rupee amount, treat it as 0 and rely on copay_pct instead
+    if 0 < copay_liab < 100:
+        copay_liab = 0.0
+
+    # Detect coverage percentage from policy terms
+    # Check for explicit percentage-based coverage rules (e.g. 80:20, 70:30, 90:10)
+    import re
+    coverage_split_pct = 0.0  # insurer's share percentage
+    if copay_pct > 0:
+        coverage_split_pct = 100.0 - copay_pct
+    else:
+        # Try to extract from terms/coverage type text
+        for text in (terms_text, cov_type):
+            m = re.search(r'(\d{2,3})\s*[:%]\s*(?:insurer|coverage|covered|cashless)', text)
+            if m:
+                coverage_split_pct = float(m.group(1))
+                copay_pct = 100.0 - coverage_split_pct
+                break
+            m2 = re.search(r'(\d{2})\s*:\s*(\d{2})', text)
+            if m2:
+                coverage_split_pct = float(m2.group(1))
+                copay_pct = float(m2.group(2))
+                break
+
+    has_copay_rule = coverage_split_pct > 0 and copay_pct > 0
+
+    # Determine the eligible (covered) amount from the bill by matching categories
+    eligible_amount = total_billed  # default: entire bill is eligible
+    if bill_items_by_category and covered_categories:
+        # Semantic mapping: broad policy categories → specific bill item categories
+        # This handles the common case where insurance documents describe coverage broadly
+        # (e.g. "In-Patient Hospitalization") while bills have granular categories
+        CATEGORY_SEMANTICS: dict[str, set[str]] = {
+            "in-patient": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation", "physician", "surgeon"},
+            "hospitalization": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation"},
+            "icu": {"icu", "iccu", "critical", "intensive", "ventilation", "monitoring", "life support"},
+            "critical care": {"icu", "iccu", "critical", "intensive", "ventilation", "monitoring"},
+            "oncology": {"chemotherapy", "oncol", "cancer", "tumor", "radiation", "biopsy", "hpe", "molecular", "imatinib", "targeted"},
+            "surgical": {"surgical", "surgery", "procedure", "operation", "aspiration", "resection"},
+            "medical": {"medical", "medicine", "physician", "consultation", "monitoring", "hematological"},
+            "day care": {"day care", "infusion", "hemodialysis", "minor"},
+            "pre-hospitalization": {"pre-hospitalization", "diagnostic", "investigation", "laboratory", "test", "scan", "x-ray", "ecg", "imaging", "pathology"},
+            "post-hospitalization": {"post-hospitalization", "follow-up", "medication", "discharge"},
+            "investigations": {"investigation", "test", "laboratory", "lab", "pathology", "radiology", "scan", "x-ray", "ecg", "biopsy", "cbc", "lft", "rft", "molecular"},
+            "pharmacy": {"pharmacy", "medication", "drug", "tablet", "injection", "iv fluid", "consumable", "anti-emetic", "supportive"},
+            "room": {"room", "board", "ward", "bed", "nursing"},
+            "professional": {"professional", "fees", "consultation", "surgeon", "physician", "oncologist"},
+            "procedure": {"procedure", "surgical", "surgery", "aspiration", "administration", "monitoring", "management"},
+        }
+
+        covered_cats_lower = [c.lower().strip() for c in covered_categories]
+        
+        # Build a set of all covered semantic keywords from the policy categories
+        covered_keywords: set[str] = set()
+        for cc in covered_cats_lower:
+            for sem_key, keywords in CATEGORY_SEMANTICS.items():
+                if sem_key in cc or any(w in cc for w in sem_key.split()):
+                    covered_keywords.update(keywords)
+            # Also add the individual words from the category itself
+            covered_keywords.update(w for w in cc.split() if len(w) > 2)
+        
+        # Normalize keywords: add both singular and plural forms for robust matching
+        normalized_keywords: set[str] = set()
+        for kw in covered_keywords:
+            normalized_keywords.add(kw)
+            normalized_keywords.add(kw.rstrip('s'))  # singular
+            normalized_keywords.add(kw + 's')        # plural
+
+        matched_amount = 0.0
+        unmatched_amount = 0.0
+        for cat, cat_amt in bill_items_by_category.items():
+            cat_lower = cat.lower().strip()
+            cat_words = set(w for w in re.split(r'[\s/&,]+', cat_lower) if len(w) > 2)
+            # Also add stemmed forms of bill category words
+            cat_words_stemmed = set()
+            for w in cat_words:
+                cat_words_stemmed.add(w)
+                cat_words_stemmed.add(w.rstrip('s'))
+            
+            is_covered = False
+            # Direct match
+            for cc in covered_cats_lower:
+                if cat_lower in cc or cc in cat_lower:
+                    is_covered = True
+                    break
+            # Semantic keyword match (with stemming)
+            if not is_covered and cat_words_stemmed & normalized_keywords:
+                is_covered = True
+
+            if is_covered:
+                matched_amount += cat_amt
+            else:
+                unmatched_amount += cat_amt
+        
+        # If most (>50%) bill categories match, consider the entire bill eligible
+        # This handles cases where category naming is slightly different
+        if matched_amount > 0:
+            match_ratio = matched_amount / (matched_amount + unmatched_amount) if (matched_amount + unmatched_amount) > 0 else 1.0
+            if match_ratio >= 0.5:
+                # Most items are covered; treat the full bill as eligible
+                eligible_amount = total_billed
+            else:
+                eligible_amount = matched_amount
+
+    # Cap eligible amount by sum insured
+    if sum_insured > 0:
+        eligible_amount = min(eligible_amount, sum_insured)
+
+    # Adjudication calculation
+    if has_copay_rule:
+        # Percentage-based coverage rule (e.g. 80:20 risk-sharing)
+        insurer_pct = coverage_split_pct / 100.0
+        if pre_auth_appr > 0 and pre_auth_appr < eligible_amount:
+            # Exact pre-auth amount overrides percentage calculation
+            insured_amount = pre_auth_appr
+        else:
+            insured_amount = round(eligible_amount * insurer_pct, 2)
+        # Determine patient payable
+        if policy_patient_oop > 100:
+            # Explicit rupee amount from the document (> 100 to filter out ratios)
+            patient_payable = policy_patient_oop
+        elif copay_liab > 100:
+            # Explicit rupee co-payment liability amount
+            patient_payable = copay_liab
+        else:
+            # Calculate from percentage: patient pays the copay share of eligible amount
+            patient_payable = round(eligible_amount - insured_amount, 2)
+        # Add any uncovered amount to patient payable
+        if eligible_amount < total_billed:
+            patient_payable = round(patient_payable + (total_billed - eligible_amount), 2)
+    elif pre_auth_appr > 0:
+        # Pre-authorized trust/insurer sanction exists in document (exact amount)
+        insured_amount = min(total_billed, pre_auth_appr) if total_billed > 0 else pre_auth_appr
+        patient_payable = policy_patient_oop if policy_patient_oop > 100 else 0.0
+        if patient_payable == 0.0 and total_billed > insured_amount:
+            patient_payable = round(total_billed - insured_amount, 2)
+    elif copay_pct > 0:
+        copay_amt = round(total_billed * (copay_pct / 100.0), 2)
+        insured_amount = round(total_billed - copay_amt, 2)
+        patient_payable = copay_amt
+    elif copay_liab > 100:
+        patient_payable = min(total_billed, copay_liab)
+        insured_amount = round(total_billed - patient_payable, 2)
+    elif "cashless" in cov_type or (copay_liab == 0.0 and copay_pct == 0.0):
+        # Full cashless scheme (e.g. Dr. YSR Aarogyasri / AB-PMJAY)
+        max_limit = sum_insured if sum_insured > 0 else 2500000.0
+        insured_amount = min(total_billed, max_limit)
+        patient_payable = round(max(0.0, total_billed - insured_amount), 2)
+    else:
+        insured_amount = total_billed
+        patient_payable = 0.0
+
+    coverage_pct = round((insured_amount / total_billed * 100.0), 1) if total_billed > 0 else 100.0
+
+    if patient_payable == 0.0 and insured_amount >= total_billed:
+        status = "100% Cashless Approved"
+        notes = f"Hospital bill of INR {total_billed:,.2f} is 100% covered and approved under {scheme} (Policy #{policy_num}). Beneficiary out-of-pocket payment is INR 0.00 (NIL)."
+    elif insured_amount > 0:
+        status = f"Partially Covered ({coverage_pct}%)"
+        notes = f"Hospital bill of INR {total_billed:,.2f} has approved coverage of INR {insured_amount:,.2f} ({coverage_pct}%) under {scheme} (Policy #{policy_num}). Patient payable co-payment liability is INR {patient_payable:,.2f}."
+    else:
+        status = "Not Covered"
+        notes = f"Hospital bill of INR {total_billed:,.2f} is not covered under policy terms. Patient payable amount is INR {patient_payable:,.2f}."
+
+    return {
+        "total_billed": total_billed,
+        "insured_amount": insured_amount,
+        "patient_payable": patient_payable,
+        "coverage_percentage": coverage_pct,
+        "status": status,
+        "notes": notes,
+        "scheme_or_insurer": scheme,
+        "policy_number": policy_num,
+        "claim_or_preauth_number": preauth_num,
+        "annual_sum_insured": sum_insured,
+    }
+
+
+def _build_claim_response_resource(
+    claim_ref: str,
+    coverage_ref: str,
+    patient_ref: str,
+    organization_ref: str,
+    adjudication: dict[str, Any],
+) -> dict[str, Any]:
+    """Constructs a normative FHIR R4 ClaimResponse resource representing adjudication results."""
+    cr_id = str(uuid.uuid4())
+    total_billed = float(adjudication.get("total_billed", 0.0) or 0.0)
+    insured_amount = float(adjudication.get("insured_amount", 0.0) or 0.0)
+    patient_payable = float(adjudication.get("patient_payable", 0.0) or 0.0)
+    notes = adjudication.get("notes", "")
+
+    claim_response: dict[str, Any] = {
+        "resourceType": "ClaimResponse",
+        "id": cr_id,
+        "meta": {
+            "profile": [ABDM_CLAIM_RESPONSE_PROFILE],
+        },
+        "status": "active",
+        "type": {
+            "coding": [{
+                "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+                "code": "institutional",
+                "display": "Hospital In-Patient / Daycare Claim",
+            }]
+        },
+        "use": "claim",
+        "patient": {"reference": patient_ref},
+        "insurer": {"reference": organization_ref},
+        "request": {"reference": claim_ref},
+        "outcome": "complete",
+        "disposition": notes,
+        "insurance": [{
+            "sequence": 1,
+            "focal": True,
+            "coverage": {"reference": coverage_ref},
+        }],
+        "total": [
+            {
+                "category": {
+                    "coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+                        "code": "submitted",
+                        "display": "Submitted Amount (Total Billed)",
+                    }]
+                },
+                "amount": {
+                    "value": total_billed,
+                    "currency": "INR",
+                }
+            },
+            {
+                "category": {
+                    "coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+                        "code": "benefit",
+                        "display": "Benefit Amount (Insured / Trust Approved)",
+                    }]
+                },
+                "amount": {
+                    "value": insured_amount,
+                    "currency": "INR",
+                }
+            },
+            {
+                "category": {
+                    "coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+                        "code": "patientoutoppocket",
+                        "display": "Patient Responsibility (Patient to Pay)",
+                    }]
+                },
+                "amount": {
+                    "value": patient_payable,
+                    "currency": "INR",
+                }
+            }
+        ],
+        "payment": {
+            "type": {
+                "coding": [{
+                    "system": "http://terminology.hl7.org/CodeSystem/ex-paymenttype",
+                    "code": "complete",
+                    "display": "Complete Cashless Payment",
+                }]
+            },
+            "amount": {
+                "value": insured_amount,
+                "currency": "INR",
+            }
+        }
+    }
+
+    pre_auth_ref = adjudication.get("claim_or_preauth_number")
+    if pre_auth_ref:
+        claim_response["preAuthRef"] = pre_auth_ref
+
+    return claim_response
+
+
 def unify_patient_bundles(
     bundles: list[dict[str, Any]],
     archive_filename: str = "patient_archive.zip",
@@ -648,9 +1106,20 @@ def unify_patient_bundles(
 
     # 7. Add Billing / Claims Section if available
     all_claims: list[dict[str, Any]] = []
+    all_coverages: list[dict[str, Any]] = []
+    all_claim_responses: list[dict[str, Any]] = []
+
     if gemini_extraction and getattr(gemini_extraction, "billing_data", None):
         claim_refs: list[dict[str, str]] = []
-        for bill in gemini_extraction.billing_data:
+        raw_bills = gemini_extraction.billing_data
+        demo_bills = [
+            b for b in raw_bills
+            if "demo bill" in (getattr(b, "source_document", "") or "").lower()
+            or "demo_bill" in (getattr(b, "source_document", "") or "").lower()
+            or "hospital_bill" in (getattr(b, "source_document", "") or "").lower()
+        ]
+        target_bills = demo_bills if demo_bills else raw_bills
+        for bill in target_bills:
             claim_res = _build_claim_resource(bill, patient_ref, organization_ref)
             all_claims.append(claim_res)
             claim_refs.append({"reference": f"urn:uuid:{claim_res['id']}"})
@@ -670,6 +1139,65 @@ def unify_patient_bundles(
                 },
                 "entry": claim_refs,
             })
+
+    # 8. Add Insurance Coverage & Claim Adjudication Section if available
+    if gemini_extraction and getattr(gemini_extraction, "insurance_policy", None):
+        policy_data = gemini_extraction.insurance_policy
+        coverage_res = _build_coverage_resource(policy_data, patient_ref, organization_ref)
+        all_coverages.append(coverage_res)
+
+        cov_claim_refs: list[dict[str, str]] = [{"reference": f"urn:uuid:{coverage_res['id']}"}]
+
+        # Adjudicate against hospital bill
+        bills_to_adjudicate = getattr(gemini_extraction, "billing_data", []) or []
+        adjudication = _adjudicate_bill_against_policy(bills_to_adjudicate, policy_data)
+
+        if all_claims:
+            matched_claim_id = all_claims[0]["id"]
+            for cl in all_claims:
+                s_info = cl.get("supportingInfo", [])
+                val_str = s_info[0].get("valueString", "").lower() if s_info else ""
+                if "demo bill" in val_str or "hospital_bill" in val_str:
+                    matched_claim_id = cl["id"]
+                    break
+
+            claim_response_res = _build_claim_response_resource(
+                claim_ref=f"urn:uuid:{matched_claim_id}",
+                coverage_ref=f"urn:uuid:{coverage_res['id']}",
+                patient_ref=patient_ref,
+                organization_ref=organization_ref,
+                adjudication=adjudication,
+            )
+            all_claim_responses.append(claim_response_res)
+            cov_claim_refs.append({"reference": f"urn:uuid:{claim_response_res['id']}"})
+
+        sections.append({
+            "title": "Insurance Coverage & Claim Adjudication",
+            "code": {
+                "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": "75282-4",
+                        "display": "Insurance policy",
+                    }
+                ],
+                "text": "Insurance Coverage & Claim Adjudication",
+            },
+            "text": {
+                "status": "additional",
+                "div": (
+                    f"<div xmlns='http://www.w3.org/1999/xhtml'>"
+                    f"<p><strong>Policy Number:</strong> {policy_data.policy_number} | <strong>Scheme:</strong> {policy_data.scheme_or_insurer}</p>"
+                    f"<p><strong>Status:</strong> {adjudication['status']} | <strong>Coverage:</strong> {adjudication['coverage_percentage']}%</p>"
+                    f"<p><strong>Total Billed Amount:</strong> INR {adjudication['total_billed']:,.2f}</p>"
+                    f"<p><strong>Insured / Covered Amount:</strong> INR {adjudication['insured_amount']:,.2f}</p>"
+                    f"<p><strong>Patient Out-of-Pocket Liability:</strong> INR {adjudication['patient_payable']:,.2f}</p>"
+                    f"<p><strong>Adjudication Notes:</strong> {adjudication['notes']}</p>"
+                    f"</div>"
+                ),
+            },
+            "entry": cov_claim_refs,
+        })
 
     # 8. Add Archive Document Manifest Section if available
     if gemini_extraction and getattr(gemini_extraction, "documents", None):
@@ -845,6 +1373,18 @@ def unify_patient_bundles(
         bundle_entries.append({
             "fullUrl": f"urn:uuid:{claim['id']}",
             "resource": claim,
+        })
+
+    for cov in all_coverages:
+        bundle_entries.append({
+            "fullUrl": f"urn:uuid:{cov['id']}",
+            "resource": cov,
+        })
+
+    for cr in all_claim_responses:
+        bundle_entries.append({
+            "fullUrl": f"urn:uuid:{cr['id']}",
+            "resource": cr,
         })
 
     master_bundle = {

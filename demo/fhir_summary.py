@@ -65,6 +65,12 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
   claims = [
       r for r in resources if r.get("resourceType") == "Claim"
   ]
+  coverages = [
+      r for r in resources if r.get("resourceType") == "Coverage"
+  ]
+  claim_responses = [
+      r for r in resources if r.get("resourceType") == "ClaimResponse"
+  ]
 
   profiles = []
   for resource in resources:
@@ -86,6 +92,7 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
       "patient": _summarize_patient(patient),
       "observations": [_summarize_observation(obs) for obs in observations],
       "billing": [_summarize_claim(c) for c in claims],
+      "insurance_adjudication": _summarize_insurance_adjudication(coverages, claim_responses, claims),
   }
 
 
@@ -255,4 +262,83 @@ def _summarize_claim(claim: dict[str, Any]) -> dict[str, Any]:
       "payment_mode": _display(payment_mode),
       "source_document": _display(source_document),
       "items": items,
+  }
+
+
+def _summarize_insurance_adjudication(
+    coverages: list[dict[str, Any]],
+    claim_responses: list[dict[str, Any]],
+    claims: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+  """Extracts insurance policy parameters and bill adjudication from Coverage and ClaimResponse resources."""
+  if not coverages and not claim_responses:
+    return None
+
+  cov = coverages[0] if coverages else {}
+  cr = claim_responses[0] if claim_responses else {}
+
+  policy_number = cov.get("subscriberId", "") or ""
+  if not policy_number or policy_number == "N/A":
+    for ident in cov.get("identifier", []) or []:
+      if isinstance(ident, dict) and ident.get("value"):
+        policy_number = ident["value"]
+        break
+
+  payor_list = cov.get("payor", []) or []
+  insurer_name = payor_list[0].get("display", "Health Insurance Scheme") if payor_list else "Health Insurance Scheme"
+
+  cov_type = ""
+  classes = cov.get("class", []) or []
+  for cls_item in classes:
+    if isinstance(cls_item, dict) and cls_item.get("name") and not cov_type:
+      cov_type = cls_item["name"]
+
+  total_billed = 0.0
+  insured_amount = 0.0
+  patient_payable = 0.0
+
+  for tot in cr.get("total", []) or []:
+    if not isinstance(tot, dict):
+      continue
+    cat_codes = [
+        c.get("code")
+        for c in tot.get("category", {}).get("coding", []) or []
+    ]
+    val = float(tot.get("amount", {}).get("value", 0) or 0)
+    if "submitted" in cat_codes:
+      total_billed = val
+    elif "benefit" in cat_codes:
+      insured_amount = val
+    elif "patientoutoppocket" in cat_codes or "copay" in cat_codes:
+      patient_payable = val
+
+  if insured_amount == 0.0 and cr.get("payment", {}).get("amount", {}).get("value"):
+    insured_amount = float(cr["payment"]["amount"]["value"])
+
+  if total_billed == 0.0 and claims:
+    total_billed = float(claims[0].get("total", {}).get("value", 0) or 0)
+
+  if patient_payable == 0.0 and total_billed > insured_amount:
+    patient_payable = round(total_billed - insured_amount, 2)
+
+  coverage_pct = round((insured_amount / total_billed * 100.0), 1) if total_billed > 0 else 100.0
+  status = "100% Cashless Covered" if (patient_payable == 0.0 and insured_amount >= total_billed and total_billed > 0) else (
+      f"Partially Covered ({coverage_pct}%)" if insured_amount > 0 else "Not Covered"
+  )
+
+  pre_auth_ref = cr.get("preAuthRef", "") or ""
+  disposition = cr.get("disposition", "") or ""
+
+  return {
+      "has_insurance": True,
+      "policy_number": _display(policy_number),
+      "insurer_name": _display(insurer_name),
+      "coverage_type": _display(cov_type),
+      "pre_auth_ref": _display(pre_auth_ref),
+      "total_billed": total_billed,
+      "insured_amount": insured_amount,
+      "patient_payable": patient_payable,
+      "coverage_percentage": coverage_pct,
+      "status": status,
+      "disposition": disposition,
   }

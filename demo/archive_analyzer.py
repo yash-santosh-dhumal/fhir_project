@@ -61,6 +61,28 @@ IGNORED_PATTERNS = (
     "ehthumbs.db",
 )
 
+# ── Non-Text Visual Evidence Photo Identifiers ──
+# Folders and filenames containing camera photos of wards, selfies, beds, wound photos,
+# emblems, and QR codes that do not contain readable medical text or lab tables.
+NON_TEXT_PHOTO_FOLDERS = (
+    "anm selfie",
+    "ward photos",
+    "on bed visit",
+    "after discharge photo",
+    "after surgery",
+    "intra op photos",
+)
+
+NON_TEXT_PHOTO_FILENAMES = (
+    "ap_emblem",
+    "qr_code",
+    "qr_test",
+    "patient_photo",
+    "patient_portrait",
+    "emblem_tp",
+    "discharge photo",
+)
+
 
 class ArchiveSecurityError(Exception):
     """Raised when an archive violates security limits (Zip-Slip, Zip Bomb, etc.)."""
@@ -80,6 +102,7 @@ class ArchiveDocument:
     file_bytes: bytes  # Document content
     mime_type: str  # e.g., "application/pdf", "image/jpeg"
     size_bytes: int  # Uncompressed byte size
+    is_clinical_text_document: bool = True  # True if document contains readable clinical/financial text
 
     def to_dict(self, include_bytes: bool = False) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -88,6 +111,7 @@ class ArchiveDocument:
             "folder_path": self.folder_path,
             "mime_type": self.mime_type,
             "size_bytes": self.size_bytes,
+            "is_clinical_text_document": self.is_clinical_text_document,
         }
         if include_bytes:
             data["file_bytes"] = self.file_bytes
@@ -324,6 +348,16 @@ def _extract_files_from_zip(
         base_filename = posixpath.basename(full_path)
         folder_path = posixpath.dirname(full_path)
 
+        # Detect non-text visual evidence photos vs clinical/financial text documents
+        is_clinical = True
+        folder_lower = folder_path.lower()
+        base_stem_lower = Path(base_filename).stem.lower()
+
+        if any(f in folder_lower for f in NON_TEXT_PHOTO_FOLDERS):
+            is_clinical = False
+        elif any(f in base_stem_lower for f in NON_TEXT_PHOTO_FILENAMES):
+            is_clinical = False
+
         doc = ArchiveDocument(
             filename=base_filename,
             relative_path=full_path,
@@ -331,10 +365,12 @@ def _extract_files_from_zip(
             file_bytes=content,
             mime_type=mime_type,
             size_bytes=len(content),
+            is_clinical_text_document=is_clinical,
         )
         documents.append(doc)
         discovered_paths.append(full_path)
-        log.info("  ✓ Extracted: %s (%s, %d bytes)", full_path, mime_type, len(content))
+        log.info("  ✓ Extracted: %s (%s, %d bytes, clinical_text=%s)",
+                 full_path, mime_type, len(content), is_clinical)
 
     return total_uncompressed
 
@@ -367,6 +403,8 @@ def extract_and_analyze_archive(
         ArchiveFormatError: If the archive is corrupt or invalid.
         ArchiveSecurityError: If Zip-Slip or Zip-Bomb thresholds are breached.
     """
+    import re
+
     log.info("═" * 60)
     log.info("Archive analysis starting: '%s' (%d bytes)", archive_name, len(file_bytes))
     log.info("═" * 60)
@@ -418,11 +456,26 @@ def extract_and_analyze_archive(
         max_total_uncompressed_bytes,
     )
 
+    # If the archive contains an insurance policy PDF, mark redundant pre-rendered PNG page images as non-clinical
+    has_policy_pdf = any(
+        d.filename.lower().endswith(".pdf") and any(k in d.filename.lower() for k in ("policy", "insurance", "claim"))
+        for d in documents
+    )
+    if has_policy_pdf:
+        for doc in documents:
+            stem = Path(doc.filename).stem.lower()
+            if re.match(r"^(policy_)?page_\d+$", stem) and doc.mime_type.startswith("image/"):
+                doc.is_clinical_text_document = False
+                log.info("  Marked redundant policy image render as non-clinical: %s", doc.relative_path)
+
     tree = _build_folder_tree(discovered_paths)
 
     log.info("═" * 60)
-    log.info("Archive analysis complete: %d documents extracted, %d skipped",
-             len(documents), len(skipped_files))
+    log.info("Archive analysis complete: %d documents extracted (%d clinical text, %d visual photos), %d skipped",
+             len(documents),
+             sum(1 for d in documents if d.is_clinical_text_document),
+             sum(1 for d in documents if not d.is_clinical_text_document),
+             len(skipped_files))
     for s in skipped_files:
         log.info("  Skipped: %s → %s", s.path, s.reason)
     log.info("═" * 60)

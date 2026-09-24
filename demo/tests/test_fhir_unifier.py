@@ -244,6 +244,127 @@ class TestFhirUnifier(unittest.TestCase):
         self.assertEqual(val_result["error_count"], 0)
         self.assertEqual(val_result["compliance_score"], 100)
 
+    def test_adjudication_demo_bill_cashless_approval(self):
+        from demo.gemini_ocr import (
+            ArchiveExtractionResult,
+            ExtractedBillingData,
+            ExtractedBillingItem,
+            ExtractedInsurancePolicy,
+        )
+        from demo.fhir_unifier import _adjudicate_bill_against_policy
+
+        policy = ExtractedInsurancePolicy(
+            policy_number="WAP138200500121/04",
+            scheme_or_insurer="Dr. YSR Aarogyasri / AB-PMJAY",
+            claim_or_preauth_number="APTRUST/KNL/2025/1/13510681/07",
+            annual_sum_insured=2500000.0,
+            pre_auth_approved_amount=42962.0,
+            patient_out_of_pocket=0.0,
+            coverage_type="Cashless Government Health Assurance Floater",
+        )
+        bill = ExtractedBillingData(
+            bill_number="BILL-2025-AP-01",
+            total_amount=42962.0,
+            source_document="AP12363098/demo bill/Hospital_Bill_AP12363098.pdf",
+            items=[ExtractedBillingItem(description="Surgical Procedure", amount=42962.0)],
+        )
+
+        adj = _adjudicate_bill_against_policy([bill], policy)
+        self.assertEqual(adj["total_billed"], 42962.0)
+        self.assertEqual(adj["insured_amount"], 42962.0)
+        self.assertEqual(adj["patient_payable"], 0.0)
+        self.assertEqual(adj["coverage_percentage"], 100.0)
+        self.assertEqual(adj["status"], "100% Cashless Approved")
+
+    def test_adjudication_80_20_copay_policy(self):
+        from demo.gemini_ocr import ExtractedBillingData, ExtractedBillingItem, ExtractedInsurancePolicy
+        from demo.fhir_unifier import _adjudicate_bill_against_policy
+
+        policy = ExtractedInsurancePolicy(
+            policy_number="WAP138200500121/04",
+            scheme_or_insurer="Dr. YSR Aarogyasri / AB-PMJAY",
+            claim_or_preauth_number="APTRUST/KNL/2025/1/13510681/07",
+            annual_sum_insured=2500000.0,
+            pre_auth_approved_amount=34370.0,
+            patient_out_of_pocket=8592.0,
+            copayment_percentage=20.0,
+            copayment_liability=8592.0,
+            coverage_type="Co-Pay Health Assurance Scheme (80:20 Risk-Sharing)",
+            terms_and_rules="Adjudicated under 80:20 risk-sharing clause: 80% sanctioned by Trust, 20% co-payment out-of-pocket.",
+        )
+        bill = ExtractedBillingData(
+            bill_number="BILL/ONC/129368/2026",
+            total_amount=42962.0,
+            source_document="AP12363098/demo bill/Hospital_Bill_AP12363098.pdf",
+            items=[ExtractedBillingItem(description="Targeted Chemotherapy & Bed Charges", amount=42962.0)],
+        )
+
+        adj = _adjudicate_bill_against_policy([bill], policy)
+        self.assertEqual(adj["total_billed"], 42962.0)
+        self.assertEqual(adj["insured_amount"], 34370.0)
+        self.assertEqual(adj["patient_payable"], 8592.0)
+        self.assertEqual(adj["coverage_percentage"], 80.0)
+        self.assertEqual(adj["status"], "Partially Covered (80.0%)")
+
+    def test_unify_patient_bundles_with_coverage_and_claim_response(self):
+        from demo.gemini_ocr import (
+            ArchiveExtractionResult,
+            ExtractedBillingData,
+            ExtractedBillingItem,
+            ExtractedInsurancePolicy,
+        )
+
+        extraction = ArchiveExtractionResult(
+            billing_data=[
+                ExtractedBillingData(
+                    bill_number="BILL-42962",
+                    total_amount=42962.0,
+                    source_document="demo bill/Hospital_Bill_AP12363098.pdf",
+                    items=[ExtractedBillingItem(description="In-Patient Charges", amount=42962.0)],
+                )
+            ],
+            insurance_policy=ExtractedInsurancePolicy(
+                policy_number="WAP138200500121/04",
+                scheme_or_insurer="Dr. YSR Aarogyasri / AB-PMJAY",
+                claim_or_preauth_number="APTRUST/KNL/2025/1/13510681/07",
+                annual_sum_insured=2500000.0,
+                pre_auth_approved_amount=42962.0,
+                patient_out_of_pocket=0.0,
+                coverage_type="Cashless Government Health Assurance Floater",
+            ),
+        )
+
+        unified = unify_patient_bundles(
+            [self.bundle1],
+            archive_filename="AP12363098.zip",
+            gemini_extraction=extraction,
+        )
+
+        entries = unified.get("entry", [])
+        resources = [e["resource"] for e in entries]
+
+        # Verify Coverage and ClaimResponse resources exist
+        coverages = [r for r in resources if r["resourceType"] == "Coverage"]
+        claims = [r for r in resources if r["resourceType"] == "Claim"]
+        claim_responses = [r for r in resources if r["resourceType"] == "ClaimResponse"]
+
+        self.assertEqual(len(coverages), 1)
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(len(claim_responses), 1)
+
+        cr = claim_responses[0]
+        self.assertEqual(cr["outcome"], "complete")
+        self.assertEqual(cr["preAuthRef"], "APTRUST/KNL/2025/1/13510681/07")
+        totals = {t["category"]["coding"][0]["code"]: t["amount"]["value"] for t in cr["total"]}
+        self.assertEqual(totals.get("submitted"), 42962.0)
+        self.assertEqual(totals.get("benefit"), 42962.0)
+        self.assertEqual(totals.get("patientoutoppocket"), 0.0)
+
+        # Ensure composition has the Insurance section
+        composition = [r for r in resources if r["resourceType"] == "Composition"][0]
+        sec_titles = [s.get("title") for s in composition.get("section", [])]
+        self.assertIn("Insurance Coverage & Claim Adjudication", sec_titles)
+
 
 if __name__ == "__main__":
     unittest.main()
