@@ -641,6 +641,7 @@ def _merge_batch_results(
 def process_archive_documents_with_gemini(
     documents: list[Any],  # list of ArchiveDocument
     batch_size: int = MAX_BATCH_SIZE,
+    skip_insurance: bool = False,
 ) -> ArchiveExtractionResult:
     """Runs high-level OCR and information extraction on ALL archive documents.
 
@@ -651,6 +652,7 @@ def process_archive_documents_with_gemini(
     Args:
         documents: List of ArchiveDocument objects extracted from the ZIP archive.
         batch_size: Number of documents to send per Gemini API call.
+        skip_insurance: If True, ignores insurance policy documents (hospital mode).
 
     Returns:
         ArchiveExtractionResult containing demographics, document classification,
@@ -660,7 +662,7 @@ def process_archive_documents_with_gemini(
         return ArchiveExtractionResult()
 
     client = _get_gemini_client()
-    log.info("Starting Gemini high-level OCR on %d documents...", len(documents))
+    log.info("Starting Gemini high-level OCR on %d documents (skip_insurance=%s)...", len(documents), skip_insurance)
 
     # Separate clinical text documents from non-text visual evidence photos
     text_docs = [d for d in documents if getattr(d, "is_clinical_text_document", True)]
@@ -673,14 +675,11 @@ def process_archive_documents_with_gemini(
     regular_clinical_docs: list[Any] = []
     for d in text_docs:
         rel_lower = d.relative_path.lower()
-        if (
-            "demo bill" in rel_lower
-            or "demo claims" in rel_lower
-            or "hospital_bill" in rel_lower
-            or "insurance_policy" in rel_lower
-        ):
+        is_bill = "demo bill" in rel_lower or "hospital_bill" in rel_lower
+        is_policy = not skip_insurance and ("demo claims" in rel_lower or "insurance_policy" in rel_lower)
+        if is_bill or is_policy:
             priority_financial_docs.append(d)
-        else:
+        elif not (skip_insurance and ("demo claims" in rel_lower or "insurance_policy" in rel_lower)):
             regular_clinical_docs.append(d)
 
     # Prepare batch tuples: (filename, relative_path, file_bytes, mime_type)
@@ -732,6 +731,9 @@ def process_archive_documents_with_gemini(
         [d.relative_path for d in text_docs],
     )
 
+    if skip_insurance:
+        merged.insurance_policy = None
+
     # Reconstruct merged.documents in the original order of all archive documents,
     # ensuring visual evidence photos are clearly classified without omission.
     doc_map = {d.relative_path: d for d in merged.documents}
@@ -777,3 +779,138 @@ def process_archive_documents_with_gemini(
                  merged.insurance_policy.policy_number, merged.insurance_policy.scheme_or_insurer)
 
     return merged
+
+
+def extract_insurance_policy_from_doc(
+    file_bytes: bytes,
+    mime_type: str,
+    filename: str,
+) -> ExtractedInsurancePolicy | None:
+    """Extracts insurance policy parameters, copayment rules, and coverage categories from a single document."""
+    client = _get_gemini_client()
+    parts: list[Any] = []
+
+    # Infer mime if not provided or generic
+    if not mime_type or mime_type in ("application/octet-stream", "application/x-download"):
+        fn_lower = filename.lower()
+        if fn_lower.endswith(".pdf"):
+            mime_type = "application/pdf"
+        elif fn_lower.endswith((".jpg", ".jpeg")):
+            mime_type = "image/jpeg"
+        elif fn_lower.endswith(".png"):
+            mime_type = "image/png"
+        else:
+            mime_type = "application/pdf"
+
+    from google.genai import types
+    part = _prepare_document_part(file_bytes, mime_type, filename)
+    parts.append(part)
+
+    prompt = f"""You are an expert health insurance claims auditor.
+Analyze the attached insurance policy document ({filename}) and extract all policy, coverage, and adjudication parameters.
+
+Extract:
+1. scheme_or_insurer: Insurance company name or government scheme (e.g. "Dr. YSR Aarogyasri / AB-PMJAY", "Star Health", "ICICI Lombard", etc.)
+2. policy_number: Policy / Identification number
+3. health_card_number: Health card / Beneficiary ID (if present)
+4. claim_or_preauth_number: Pre-authorization or claim reference number (if present)
+5. policy_status: "Active", "Sanctioned", etc.
+6. annual_sum_insured: Annual coverage sum limit (float, in INR, e.g. 2500000.0)
+7. copayment_percentage: Patient co-payment liability percentage as a number (e.g. 20.0 for 80:20 risk-sharing / cost-sharing mandate. If 100% cashless, return 0.0)
+8. coverage_type: e.g. "Co-Pay Health Assurance Scheme (80:20 Risk-Sharing)" or "Cashless Health Insurance Floater"
+9. pre_auth_approved_amount: Exact pre-approved / sanctioned amount in INR (if explicitly stated, else 0.0)
+10. patient_out_of_pocket: Patient payable amount in INR (if explicitly stated, else 0.0)
+11. covered_categories: List of treatments, procedures, and charges covered under the policy (e.g. ["In-Patient Hospitalization", "Medical & Surgical Oncology", "ICU", "Investigations", "Pharmacy", "Bed Charges", "General Ward"])
+12. terms_and_rules: Concise policy clause statement explaining the cost-sharing terms (e.g. "80% sanctioned by Trust/Insurer, 20% patient out-of-pocket co-payment liability")
+
+OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
+{{
+  "insurance_policy": {{
+    "scheme_or_insurer": "string",
+    "policy_number": "string",
+    "health_card_number": "string or null",
+    "claim_or_preauth_number": "string",
+    "policy_status": "Active",
+    "annual_sum_insured": 0.0,
+    "copayment_liability": 0.0,
+    "copayment_percentage": 0.0,
+    "coverage_type": "string",
+    "pre_auth_approved_amount": 0.0,
+    "patient_out_of_pocket": 0.0,
+    "covered_categories": ["string"],
+    "terms_and_rules": "string"
+  }}
+}}
+"""
+    parts.append(prompt)
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=parts,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
+            raw_text = resp.text.strip()
+            data = _clean_and_parse_json(raw_text)
+            ip = data.get("insurance_policy") or data
+            if ip and isinstance(ip, dict):
+                # Clean copay percentage
+                copay_raw = ip.get("copayment_percentage", 0)
+                copay_val = 0.0
+                if isinstance(copay_raw, str):
+                    m = re.search(r"(\d+(?:\.\d+)?)", copay_raw)
+                    if m:
+                        copay_val = float(m.group(1))
+                else:
+                    copay_val = float(copay_raw or 0)
+
+                # Check terms for percentage split if copay is 0
+                terms_text = str(ip.get("terms_and_rules") or "")
+                cov_type_text = str(ip.get("coverage_type") or "")
+                if copay_val == 0.0:
+                    for txt in (terms_text, cov_type_text):
+                        m2 = re.search(r"(\d{2})\s*:\s*(\d{2})", txt)
+                        if m2:
+                            copay_val = float(m2.group(2))
+                            break
+
+                # Extract terms and rules
+                raw_terms = ip.get("terms_and_rules", "")
+                if isinstance(raw_terms, list):
+                    terms_str = "; ".join(str(t) for t in raw_terms)
+                else:
+                    terms_str = str(raw_terms or "")
+
+                raw_categories = ip.get("covered_categories", [])
+                if isinstance(raw_categories, str):
+                    categories_list = [c.strip() for c in raw_categories.split(",") if c.strip()]
+                elif isinstance(raw_categories, list):
+                    categories_list = [str(c).strip() for c in raw_categories if str(c).strip()]
+                else:
+                    categories_list = []
+
+                return ExtractedInsurancePolicy(
+                    policy_number=str(ip.get("policy_number") or "").strip() or "POL-UNKNOWN",
+                    scheme_or_insurer=str(ip.get("scheme_or_insurer") or "").strip() or "Insurance Policy",
+                    health_card_number=str(ip.get("health_card_number") or "").strip(),
+                    claim_or_preauth_number=str(ip.get("claim_or_preauth_number") or "").strip(),
+                    policy_status=str(ip.get("policy_status") or "Active").strip(),
+                    annual_sum_insured=float(ip.get("annual_sum_insured", 0) or 0),
+                    copayment_liability=float(ip.get("copayment_liability", 0) or 0),
+                    copayment_percentage=copay_val,
+                    coverage_type=cov_type_text or ("Co-Pay Policy" if copay_val > 0 else "Cashless Policy"),
+                    pre_auth_approved_amount=float(ip.get("pre_auth_approved_amount", 0) or 0),
+                    patient_out_of_pocket=float(ip.get("patient_out_of_pocket", 0) or 0),
+                    covered_categories=categories_list,
+                    terms_and_rules=terms_str,
+                    source_document=filename,
+                )
+        except Exception as exc:
+            log.warning("extract_insurance_policy_from_doc attempt %d failed: %s", attempt + 1, exc)
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2.0)
+    return None
+

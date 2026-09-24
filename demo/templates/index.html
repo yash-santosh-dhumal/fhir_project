@@ -3,337 +3,550 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Medical Data Toolkit — FHIR Dashboard</title>
-    <meta name="description" content="Production-ready FHIR R4 medical data extraction and visualization dashboard for hospital MIS data.">
+    <title>National Health &amp; Insurance Exchange — ABDM FHIR R4</title>
+    <meta name="description" content="Production-ready ABDM FHIR R4 medical data extraction and automated insurance claim adjudication portal.">
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=3">
   </head>
   <body>
     <main class="page">
-      <!-- Portal Switcher -->
-      <div class="portal-switcher" id="portalSwitcher">
-        <button class="portal-btn active" id="portalBtnHospital" data-portal="hospital">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M9 8h1"/><path d="M9 12h1"/><path d="M9 16h1"/><path d="M14 8h1"/><path d="M14 12h1"/><path d="M14 16h1"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg>
-          Hospital Portal
-        </button>
-        <button class="portal-btn" id="portalBtnInsurance" data-portal="insurance">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
-          Insurance Portal
-        </button>
-      </div>
 
-      <header class="hero">
-        <div>
-          <p class="eyebrow" id="heroEyebrow">Google Health Medical Data Toolkit</p>
-          <h1 id="heroTitle">FHIR Dashboard</h1>
-          <p class="subtitle" id="heroSubtitle">Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.</p>
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!-- 1. LOGIN VIEW (Initial Landing / Portal Switcher Gateway)   -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <section class="login-view" id="loginView">
+        <div class="login-header">
+          <div class="login-badge-row">
+            <span class="auth-flag-badge">🇮🇳 ABDM Integrated Health Exchange</span>
+            <span class="auth-fhir-badge">HL7® FHIR® R4 Certified</span>
+          </div>
+          <h1>National Medical Records &amp; Insurance Adjudication Gateway</h1>
+          <p class="login-subtitle">
+            Secure multi-stakeholder healthcare portal. Select your authorized domain to sign in.
+          </p>
         </div>
-        <div class="hero-right">
-          <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
-          <div id="dbStats" class="db-stats"></div>
-        </div>
-      </header>
 
-      <section class="flow" aria-label="Toolkit flow">
-        <span>PDF / Image</span>
-        <span>AI Document Understanding</span>
-        <span>Medical Data Extraction</span>
-        <span>LOINC Mapping</span>
-        <span>FHIR Bundle</span>
+        <div class="login-cards-grid">
+          <!-- Card 1: Hospital Portal Login -->
+          <article class="login-portal-card hospital-card" id="loginCardHospital">
+            <div class="portal-card-top">
+              <div class="portal-icon-wrapper hospital-accent">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 21h18"/>
+                  <path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/>
+                  <path d="M9 10h6"/>
+                  <path d="M12 7v6"/>
+                </svg>
+              </div>
+              <span class="portal-type-tag hospital-tag">Hospital Portal</span>
+            </div>
+            <h2>Hospital Information System (HIS)</h2>
+            <p class="portal-desc">
+              For clinicians, pathologists, and hospital billing staff. Upload patient archives and lab records, convert legacy documents into ABDM FHIR R4, and review patient clinical reports &amp; bills.
+            </p>
+
+            <form class="login-form" id="formLoginHospital" onsubmit="return false;">
+              <div class="form-group">
+                <label for="hospitalUsername">Username</label>
+                <input type="text" id="hospitalUsername" value="hospital_admin" placeholder="hospital_admin" required autocomplete="username">
+              </div>
+              <div class="form-group">
+                <label for="hospitalPassword">Password</label>
+                <input type="password" id="hospitalPassword" value="hospital123" placeholder="••••••••" required autocomplete="current-password">
+              </div>
+              <div id="hospitalLoginError" class="login-error-msg" hidden></div>
+              <button type="submit" class="primary login-submit-btn hospital-btn-glow" id="btnSubmitHospital">
+                <span>Sign In to Hospital Portal &rarr;</span>
+              </button>
+              <button type="button" class="secondary demo-quick-btn" id="btnQuickHospital">
+                ⚡ Quick Demo Login (Hospital)
+              </button>
+            </form>
+
+            <div class="portal-features">
+              <span>✓ Patient ZIP Upload</span>
+              <span>✓ FHIR R4 Unification</span>
+              <span>✓ Hospital Bills</span>
+              <span>✓ Adjudicated Reports</span>
+            </div>
+          </article>
+
+          <!-- Card 2: Insurance Portal Login -->
+          <article class="login-portal-card insurance-card" id="loginCardInsurance">
+            <div class="portal-card-top">
+              <div class="portal-icon-wrapper insurance-accent">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <path d="m9 12 2 2 4-4"/>
+                </svg>
+              </div>
+              <span class="portal-type-tag insurance-tag">Insurance Portal</span>
+            </div>
+            <h2>Health Insurance Claims Authority (TPA)</h2>
+            <p class="portal-desc">
+              For claims processors, insurance auditors, and TPAs. Access hospital-submitted patient files, upload insurance policies, auto-adjudicate coverage, and generate settlement reports.
+            </p>
+
+            <form class="login-form" id="formLoginInsurance" onsubmit="return false;">
+              <div class="form-group">
+                <label for="insuranceUsername">Username</label>
+                <input type="text" id="insuranceUsername" value="insurance_auditor" placeholder="insurance_auditor" required autocomplete="username">
+              </div>
+              <div class="form-group">
+                <label for="insurancePassword">Password</label>
+                <input type="password" id="insurancePassword" value="insurance123" placeholder="••••••••" required autocomplete="current-password">
+              </div>
+              <div id="insuranceLoginError" class="login-error-msg" hidden></div>
+              <button type="submit" class="primary login-submit-btn insurance-btn-glow" id="btnSubmitInsurance">
+                <span>Sign In to Insurance Portal &rarr;</span>
+              </button>
+              <button type="button" class="secondary demo-quick-btn" id="btnQuickInsurance">
+                ⚡ Quick Demo Login (Insurance)
+              </button>
+            </form>
+
+            <div class="portal-features">
+              <span>✓ Hospital Patient Dossiers</span>
+              <span>✓ Policy Document Upload</span>
+              <span>✓ Auto Claim Adjudication</span>
+              <span>✓ Coverage vs Patient Co-Pay</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="login-footer-info">
+          <p>Built on Google Health Medical Data Toolkit • Compliant with Ayushman Bharat Digital Mission (ABDM) • Educational Technical Demonstration</p>
+        </div>
       </section>
 
-      <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!-- 2. MAIN APP DASHBOARD (Protected View)                      -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <div id="appMain" class="app-main" hidden>
 
-
-      <!-- Tab navigation -->
-      <nav class="tab-nav" id="tabNav">
-        <button class="tab-btn active" data-tab="upload">Upload &amp; Convert</button>
-        <button class="tab-btn" data-tab="patients" id="tabBtnPatients">Patient Records</button>
-      </nav>
-
-      <!-- ═══ TAB: Upload & Convert ═══ -->
-      <div class="tab-panel active" id="tab-upload">
-        <section class="upload-section">
-          <article class="card upload-card" id="dropZone">
-            <h2 id="uploadCardTitle">Upload Patient Document or ZIP Archive</h2>
-            <p class="muted" id="uploadCardDesc">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
-            <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png,image/webp,image/bmp,image/tiff,.zip,application/zip,application/x-zip-compressed" hidden>
-            <div class="upload-btn-group">
-              <button id="browseButton" class="primary" type="button">Browse File</button>
-              <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
+        <!-- Enterprise Portal Session Bar -->
+        <div class="portal-session-bar" id="portalSessionBar">
+          <div class="session-left">
+            <div class="active-portal-badge" id="activePortalBadge">
+              <span class="portal-indicator-dot"></span>
+              <span id="activePortalTitle">Hospital Portal</span>
             </div>
-            <div id="fileInfo" class="file-info">No file selected</div>
+            <span class="session-divider">/</span>
+            <div class="active-user-info" id="activeUserInfo">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span id="activeUserName">Dr. R. Sharma</span>
+              <span class="user-role-pill" id="activeUserRole">Hospital Admin</span>
+            </div>
+          </div>
+          <div class="session-right">
+            <div id="healthBadge" class="status-badge offline">Toolkit Offline</div>
+            <button id="logoutBtn" class="logout-btn" type="button" title="Switch Portal or Sign Out">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <span>Switch Portal / Logout</span>
+            </button>
+          </div>
+        </div>
+
+        <header class="hero">
+          <div>
+            <p class="eyebrow" id="heroEyebrow">Google Health Medical Data Toolkit</p>
+            <h1 id="heroTitle">FHIR Dashboard</h1>
+            <p class="subtitle" id="heroSubtitle">Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.</p>
+          </div>
+          <div class="hero-right">
+            <div id="dbStats" class="db-stats"></div>
+          </div>
+        </header>
+
+        <section class="flow" aria-label="Toolkit flow">
+          <span>Patient ZIP / PDF</span>
+          <span>AI Document Understanding</span>
+          <span>Medical &amp; Bill Extraction</span>
+          <span>LOINC Mapping</span>
+          <span>ABDM FHIR Bundle</span>
+          <span>Automated Insurance Adjudication</span>
+        </section>
+
+        <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
+
+        <!-- Tab navigation -->
+        <nav class="tab-nav" id="tabNav">
+          <button class="tab-btn active" data-tab="upload" id="tabBtnUpload">Upload &amp; Convert</button>
+          <button class="tab-btn" data-tab="patients" id="tabBtnPatients">Patient Records</button>
+        </nav>
+
+        <!-- ═══ TAB: Upload & Convert ═══ -->
+        <div class="tab-panel active" id="tab-upload">
+          <section class="upload-section">
+            <article class="card upload-card" id="dropZone">
+              <h2 id="uploadCardTitle">Upload Patient Document or ZIP Archive</h2>
+              <p class="muted" id="uploadCardDesc">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
+              <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png,image/webp,image/bmp,image/tiff,.zip,application/zip,application/x-zip-compressed" hidden>
+              <div class="upload-btn-group">
+                <button id="browseButton" class="primary" type="button">Browse File</button>
+                <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
+              </div>
+              <div id="fileInfo" class="file-info">No file selected</div>
+            </article>
+          </section>
+
+          <!-- Horizontal Processing Status with Connected Line -->
+          <article class="card stepper-card">
+            <div class="stepper-header">
+              <div>
+                <h2>Processing Pipeline Status</h2>
+                <p class="muted">Live progress tracker across document understanding and FHIR conversion</p>
+              </div>
+              <p id="duration" class="duration-badge">API processing duration: Not available</p>
+            </div>
+
+            <div class="stepper-wrap">
+              <div class="stepper-track-bg"></div>
+              <div class="stepper-track-fill" id="stepperTrackFill"></div>
+
+              <div class="stepper-steps" id="stageList">
+                <div class="step-item" data-step="0">
+                  <div class="step-circle"><span class="step-icon">1</span></div>
+                  <div class="step-text">
+                    <span class="step-title">Uploading</span>
+                    <span class="step-desc">Document transfer</span>
+                  </div>
+                </div>
+                <div class="step-item" data-step="1">
+                  <div class="step-circle"><span class="step-icon">2</span></div>
+                  <div class="step-text">
+                    <span class="step-title">Understanding</span>
+                    <span class="step-desc">Document processing</span>
+                  </div>
+                </div>
+                <div class="step-item" data-step="2">
+                  <div class="step-circle"><span class="step-icon">3</span></div>
+                  <div class="step-text">
+                    <span class="step-title">Extraction</span>
+                    <span class="step-desc">Laboratory &amp; Bills</span>
+                  </div>
+                </div>
+                <div class="step-item" data-step="3">
+                  <div class="step-circle"><span class="step-icon">4</span></div>
+                  <div class="step-text">
+                    <span class="step-title">Terminology</span>
+                    <span class="step-desc">LOINC mapping</span>
+                  </div>
+                </div>
+                <div class="step-item" data-step="4">
+                  <div class="step-circle"><span class="step-icon">5</span></div>
+                  <div class="step-text">
+                    <span class="step-title">FHIR Bundle</span>
+                    <span class="step-desc">ABDM generation</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </article>
-        </section>
 
-        <!-- Horizontal Processing Status with Connected Line -->
-        <article class="card stepper-card">
-          <div class="stepper-header">
-            <div>
-              <h2>Processing Pipeline Status</h2>
-              <p class="muted">Live progress tracker across document understanding and FHIR conversion</p>
+          <section id="errorBox" class="error" hidden></section>
+
+          <!-- Validation results -->
+          <section id="validationSection" class="validation-section" hidden>
+            <div class="validation-header">
+              <h2>ABDM FHIR Compliance</h2>
+              <div id="validationScore" class="compliance-score"></div>
             </div>
-            <p id="duration" class="duration-badge">API processing duration: Not available</p>
-          </div>
+            <div id="validationIssues" class="validation-issues"></div>
+            <div id="fmmReport" class="fmm-report"></div>
+          </section>
 
-          <div class="stepper-wrap">
-            <div class="stepper-track-bg"></div>
-            <div class="stepper-track-fill" id="stepperTrackFill"></div>
-
-            <div class="stepper-steps" id="stageList">
-              <div class="step-item" data-step="0">
-                <div class="step-circle"><span class="step-icon">1</span></div>
-                <div class="step-text">
-                  <span class="step-title">Uploading</span>
-                  <span class="step-desc">Document transfer</span>
+          <!-- Insurance Plan Details & Benefits (Insurance Mode Legacy Support) -->
+          <section id="insurancePlanSection" class="insurance-plan-container" hidden>
+            <div class="ip-validation-banner">
+              <div class="ip-banner-left">
+                <div class="ip-banner-badge">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                  <span class="ip-banner-title">FHIR Validation Passed</span>
                 </div>
+                <span class="ip-banner-detail">Python: <strong class="val-valid">Valid</strong></span>
+                <span class="ip-banner-detail">FHIR Validator: <strong class="val-valid">Valid</strong></span>
               </div>
-              <div class="step-item" data-step="1">
-                <div class="step-circle"><span class="step-icon">2</span></div>
-                <div class="step-text">
-                  <span class="step-title">Understanding</span>
-                  <span class="step-desc">Document processing</span>
-                </div>
-              </div>
-              <div class="step-item" data-step="2">
-                <div class="step-circle"><span class="step-icon">3</span></div>
-                <div class="step-text">
-                  <span class="step-title">Extraction</span>
-                  <span class="step-desc">Laboratory data</span>
-                </div>
-              </div>
-              <div class="step-item" data-step="3">
-                <div class="step-circle"><span class="step-icon">4</span></div>
-                <div class="step-text">
-                  <span class="step-title">Terminology</span>
-                  <span class="step-desc">LOINC mapping</span>
-                </div>
-              </div>
-              <div class="step-item" data-step="4">
-                <div class="step-circle"><span class="step-icon">5</span></div>
-                <div class="step-text">
-                  <span class="step-title">FHIR Bundle</span>
-                  <span class="step-desc">ABDM generation</span>
-                </div>
+              <div class="ip-banner-right">
+                <span class="ip-saved-badge">Saved to DB</span>
               </div>
             </div>
-          </div>
-        </article>
 
-        <section id="errorBox" class="error" hidden></section>
-
-        <!-- Validation results -->
-        <section id="validationSection" class="validation-section" hidden>
-          <div class="validation-header">
-            <h2>ABDM FHIR Compliance</h2>
-            <div id="validationScore" class="compliance-score"></div>
-          </div>
-          <div id="validationIssues" class="validation-issues"></div>
-          <div id="fmmReport" class="fmm-report"></div>
-        </section>
-
-
-        <!-- Insurance Plan Details & Benefits (Insurance Mode) -->
-        <section id="insurancePlanSection" class="insurance-plan-container" hidden>
-          <!-- Validation Banner -->
-          <div class="ip-validation-banner">
-            <div class="ip-banner-left">
-              <div class="ip-banner-badge">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                </svg>
-                <span class="ip-banner-title">FHIR Validation Passed</span>
+            <div class="ip-details-card">
+              <div class="ip-card-header">
+                <div class="ip-icon-box">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <line x1="10" y1="9" x2="8" y2="9"></line>
+                  </svg>
+                </div>
+                <h3>Insurance Plan Details</h3>
               </div>
-              <span class="ip-banner-detail">Python: <strong class="val-valid">Valid</strong></span>
-              <span class="ip-banner-detail">FHIR Validator: <strong class="val-valid">Valid</strong></span>
+              <div class="ip-details-grid">
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">PLAN NAME</span>
+                  <span class="ip-metric-val" id="ipdPlanName">—</span>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">INSURER</span>
+                  <span class="ip-metric-val" id="ipdInsurer">—</span>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">UIN</span>
+                  <span class="ip-metric-val" id="ipdUin">—</span>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">PLAN TYPE</span>
+                  <span class="ip-metric-val" id="ipdPlanType">—</span>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">STATUS</span>
+                  <div class="ip-metric-val" id="ipdStatus">
+                    <span class="ip-status-pill"><span class="ip-dot">•</span> Active</span>
+                  </div>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">POLICY PERIOD</span>
+                  <span class="ip-metric-val" id="ipdPolicyPeriod">— to —</span>
+                </div>
+                <div class="ip-metric-box">
+                  <span class="ip-metric-label">BUNDLE ID</span>
+                  <span class="ip-metric-val mono" id="ipdBundleId">—</span>
+                </div>
+              </div>
             </div>
-            <div class="ip-banner-right">
-              <span class="ip-saved-badge">Saved to DB</span>
-            </div>
-          </div>
 
-          <!-- Insurance Plan Details Card -->
-          <div class="ip-details-card">
-            <div class="ip-card-header">
-              <div class="ip-icon-box">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <div class="ip-benefits-section">
+              <div class="ip-benefits-header">
+                <div class="ip-benefits-icon">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="9 12 11.5 14.5 15.5 9.5"></polyline>
+                  </svg>
+                </div>
+                <h3 id="ipdBenefitsTitle">Benefits (0)</h3>
+              </div>
+              <div class="ip-benefits-grid" id="ipdBenefitsGrid"></div>
+            </div>
+          </section>
+
+          <!-- Insurance Adjudication Section (Post-Upload) -->
+          <section id="insuranceAdjudicationSection" class="insurance-plan-container" hidden style="margin-bottom:1.5rem"></section>
+
+          <!-- Post-Upload View Report Action Banner -->
+          <section id="viewReportSection" class="card" hidden style="margin-bottom:1.5rem;text-align:center;padding:28px 24px;background:linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(16,185,129,0.1) 100%);border:1px solid rgba(99,102,241,0.35);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,0.12)">
+            <div style="display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.35);color:#4ade80;margin-bottom:12px">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            </div>
+            <h2 style="margin:0 0 6px 0;font-size:1.25rem;color:#fff" id="viewReportTitle">Patient Archive Processed &amp; Unified Successfully</h2>
+            <p class="muted" style="max-width:620px;margin:0 auto 20px auto;font-size:0.88rem;color:var(--text-secondary)" id="viewReportDesc">
+              All documents, laboratory investigations, and hospital bills have been extracted, validated against ABDM profiles, and recorded in the patient file.
+            </p>
+            <div style="display:flex;justify-content:center;gap:12px">
+              <button id="viewReportBtn" class="primary" type="button" style="padding:12px 28px;font-size:0.95rem;font-weight:700;display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(99,102,241,0.4);cursor:pointer">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                   <polyline points="14 2 14 8 20 8"></polyline>
                   <line x1="16" y1="13" x2="8" y2="13"></line>
                   <line x1="16" y1="17" x2="8" y2="17"></line>
-                  <line x1="10" y1="9" x2="8" y2="9"></line>
                 </svg>
-              </div>
-              <h3>Insurance Plan Details</h3>
+                <span>View Report in Patient Records &rarr;</span>
+              </button>
             </div>
-            <div class="ip-details-grid">
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">PLAN NAME</span>
-                <span class="ip-metric-val" id="ipdPlanName">—</span>
+          </section>
+
+          <!-- Quick summary row -->
+          <section class="grid" id="summaryGrid">
+            <article class="card">
+              <h2>FHIR Resource Summary</h2>
+              <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
+              <h3>FHIR Profiles</h3>
+              <ul id="profileList" class="profiles"><li>Not available</li></ul>
+            </article>
+
+            <article class="card">
+              <h2 id="extractedDataTitle">Extracted Clinical Data</h2>
+              <div class="patient">
+                <div><strong>Patient</strong><span id="patientName">Not available</span></div>
+                <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
+                <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
+                <div><strong>Aadhaar / UID</strong><span id="patientAadhaar">Not available</span></div>
+                <div><strong>ABHA / Scheme</strong><span id="patientAbha">Not available</span></div>
+                <div><strong>Guardian / Father</strong><span id="patientGuardian">Not available</span></div>
+                <div><strong>Mobile / Phone</strong><span id="patientPhone">Not available</span></div>
+                <div><strong>Hospital IP / MRN</strong><span id="patientHospId">Not available</span></div>
+                <div><strong>Address</strong><span id="patientAddress">Not available</span></div>
               </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">INSURER</span>
-                <span class="ip-metric-val" id="ipdInsurer">—</span>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Test</th>
+                      <th>LOINC</th>
+                      <th>Result</th>
+                      <th>Unit</th>
+                      <th>Reference Range</th>
+                    </tr>
+                  </thead>
+                  <tbody id="observationsBody">
+                    <tr><td colspan="5">No observations loaded.</td></tr>
+                  </tbody>
+                </table>
               </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">UIN</span>
-                <span class="ip-metric-val" id="ipdUin">—</span>
-              </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">PLAN TYPE</span>
-                <span class="ip-metric-val" id="ipdPlanType">—</span>
-              </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">STATUS</span>
-                <div class="ip-metric-val" id="ipdStatus">
-                  <span class="ip-status-pill"><span class="ip-dot">•</span> Active</span>
+            </article>
+          </section>
+
+          <!-- FHIR Format (Raw JSON) with Collapsible Dropdown -->
+          <section class="card raw-card" id="rawJsonSection">
+            <details id="rawJsonDetails" class="raw-json-details">
+              <summary class="raw-header" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;user-select:none">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="raw-toggle-arrow" style="display:inline-flex;transition:transform 0.2s">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </span>
+                  <h2 style="margin:0;font-size:1.05rem">FHIR Format (Raw JSON)</h2>
+                  <span style="font-size:0.75rem;padding:2px 8px;border-radius:4px;background:var(--bg-input);color:var(--text-muted);border:1px solid var(--border)">Dropdown (Click to view code)</span>
                 </div>
+                <button id="copyButton" class="secondary small" type="button" disabled onclick="event.stopPropagation()">Copy JSON</button>
+              </summary>
+              <div style="margin-top:14px">
+                <pre><code id="rawJson" class="language-json">{}</code></pre>
               </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">POLICY PERIOD</span>
-                <span class="ip-metric-val" id="ipdPolicyPeriod">— to —</span>
-              </div>
-              <div class="ip-metric-box">
-                <span class="ip-metric-label">BUNDLE ID</span>
-                <span class="ip-metric-val mono" id="ipdBundleId">—</span>
+            </details>
+          </section>
+        </div>
+
+        <!-- ═══ TAB: Patient Records ═══ -->
+        <div class="tab-panel" id="tab-patients">
+          <section class="card">
+            <div class="section-header">
+              <h2 id="patientsSectionTitle">Patient Records</h2>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span id="patientListCountBadge" class="manifest-badge" style="font-size:0.8rem">5 Records</span>
+                <button id="refreshPatientsBtn" class="secondary small" type="button">Refresh</button>
               </div>
             </div>
-          </div>
+            <div id="patientsList" class="patients-grid">
+              <p class="muted">No patients recorded yet. Upload patient archives or lab reports to populate.</p>
+            </div>
+          </section>
 
-          <!-- Benefits Section -->
-          <div class="ip-benefits-section">
-            <div class="ip-benefits-header">
-              <div class="ip-benefits-icon">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <polyline points="9 12 11.5 14.5 15.5 9.5"></polyline>
+          <section id="patientDetail" class="card patient-report-card" hidden>
+            <div class="section-header" style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px">
+              <h2 id="patientDetailName">Clinical Diagnostic Report (HL7® FHIR® R4)</h2>
+              <div style="display:flex;gap:8px">
+                <button id="printReportBtn" class="secondary small" type="button" onclick="window.print()">Print / Export PDF</button>
+                <button id="closePatientDetailBtn" class="secondary small" type="button">Close Report</button>
+              </div>
+            </div>
+            <div id="patientDetailContent"></div>
+          </section>
+        </div>
+
+      </div><!-- End #appMain -->
+
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!-- 3. POLICY UPLOAD & ADJUDICATION MODAL (Insurance Portal)   -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <div id="policyUploadModal" class="modal-backdrop" hidden>
+        <div class="modal-card">
+          <div class="modal-header">
+            <div class="modal-title-wrap">
+              <div class="modal-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <path d="m9 12 2 2 4-4"/>
                 </svg>
               </div>
-              <h3 id="ipdBenefitsTitle">Benefits (0)</h3>
+              <div>
+                <h3 id="modalPatientTitle">Upload Insurance Policy Document</h3>
+                <p class="muted modal-sub" id="modalPatientSub">Adjudicate claim against patient hospital bill</p>
+              </div>
             </div>
-            <div class="ip-benefits-grid" id="ipdBenefitsGrid">
-              <!-- Benefit cards rendered here -->
+            <button class="modal-close-btn" id="closePolicyModalBtn" type="button">&times;</button>
+          </div>
+
+          <div class="modal-body">
+            <!-- Patient & Bill Context Summary Card -->
+            <div class="modal-context-box">
+              <div class="ctx-item">
+                <span class="ctx-label">PATIENT NAME</span>
+                <span class="ctx-val" id="modalCtxPatientName">—</span>
+              </div>
+              <div class="ctx-item">
+                <span class="ctx-label">HOSPITAL ID / MRN</span>
+                <span class="ctx-val" id="modalCtxHospId">—</span>
+              </div>
+              <div class="ctx-item">
+                <span class="ctx-label">TOTAL HOSPITAL BILL</span>
+                <span class="ctx-val highlight" id="modalCtxBillAmount">₹0.00</span>
+              </div>
+              <div class="ctx-item">
+                <span class="ctx-label">CURRENT STATUS</span>
+                <span class="ctx-val" id="modalCtxStatus">Pending Adjudication</span>
+              </div>
             </div>
-          </div>
-        </section>
 
-        <!-- Insurance Adjudication Section (Hospital Portal) -->
-        <section id="insuranceAdjudicationSection" class="insurance-plan-container" hidden style="margin-bottom:1.5rem">
-        </section>
-
-        <!-- Post-Upload View Report Action Banner (Displayed for processed archives instead of clinical data grids) -->
-        <section id="viewReportSection" class="card" hidden style="margin-bottom:1.5rem;text-align:center;padding:28px 24px;background:linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(16,185,129,0.1) 100%);border:1px solid rgba(99,102,241,0.35);border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,0.12)">
-          <div style="display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.35);color:#4ade80;margin-bottom:12px">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-          </div>
-          <h2 style="margin:0 0 6px 0;font-size:1.25rem;color:#fff" id="viewReportTitle">Patient Archive Processed &amp; Unified Successfully</h2>
-          <p class="muted" style="max-width:620px;margin:0 auto 20px auto;font-size:0.88rem;color:var(--text-secondary)" id="viewReportDesc">
-            All documents, laboratory investigations, hospital bills, and insurance coverage have been extracted, validated against ABDM profiles, and recorded in the patient file.
-          </p>
-          <div style="display:flex;justify-content:center;gap:12px">
-            <button id="viewReportBtn" class="primary" type="button" style="padding:12px 28px;font-size:0.95rem;font-weight:700;display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(99,102,241,0.4);cursor:pointer">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
+            <!-- Upload Area -->
+            <div class="policy-drop-zone" id="policyDropZone">
+              <input type="file" id="policyFileInput" accept=".pdf,image/jpeg,image/png" hidden>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="12" y1="18" x2="12" y2="12"/>
+                <line x1="9" y1="15" x2="12" y2="12"/>
+                <line x1="15" y1="15" x2="12" y2="12"/>
               </svg>
-              <span>View Report in Patient Records &rarr;</span>
+              <p class="drop-primary-txt">Drag &amp; Drop Insurance Policy Document (PDF / Image)</p>
+              <p class="drop-sub-txt">or click to browse from your device</p>
+              <div id="policySelectedFileInfo" class="selected-file-pill" hidden></div>
+            </div>
+
+            <!-- Quick Sample Policy Selection -->
+            <div class="sample-policies-block">
+              <div class="sample-block-title">
+                <span>Or select a pre-loaded sample policy document:</span>
+              </div>
+              <div class="sample-policy-buttons" id="samplePolicyButtons">
+                <!-- Dynamically populated sample policies -->
+              </div>
+            </div>
+
+            <!-- Adjudication Progress Track -->
+            <div id="adjudicationProgress" class="adjudication-progress" hidden>
+              <div class="progress-bar-container">
+                <div class="progress-bar active" style="width:100%"></div>
+              </div>
+              <p id="adjudicationStatusText" class="adj-status-text">Analyzing Policy Document with Gemini Vision OCR...</p>
+            </div>
+
+            <div id="modalErrorBox" class="modal-error" hidden></div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="secondary" id="cancelPolicyModalBtn">Cancel</button>
+            <button type="button" class="primary insurance-btn-glow" id="submitPolicyModalBtn" disabled>
+              Submit &amp; Adjudicate Claim &rarr;
             </button>
           </div>
-        </section>
-
-        <!-- Quick summary row -->
-        <section class="grid" id="summaryGrid">
-          <article class="card">
-            <h2>FHIR Resource Summary</h2>
-            <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
-            <h3>FHIR Profiles</h3>
-            <ul id="profileList" class="profiles"><li>Not available</li></ul>
-          </article>
-
-          <article class="card">
-            <h2 id="extractedDataTitle">Extracted Clinical Data</h2>
-            <div class="patient">
-              <div><strong>Patient</strong><span id="patientName">Not available</span></div>
-              <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
-              <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
-              <div><strong>Aadhaar / UID</strong><span id="patientAadhaar">Not available</span></div>
-              <div><strong>ABHA / Scheme</strong><span id="patientAbha">Not available</span></div>
-              <div><strong>Guardian / Father</strong><span id="patientGuardian">Not available</span></div>
-              <div><strong>Mobile / Phone</strong><span id="patientPhone">Not available</span></div>
-              <div><strong>Hospital IP / MRN</strong><span id="patientHospId">Not available</span></div>
-              <div><strong>Address</strong><span id="patientAddress">Not available</span></div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Test</th>
-                    <th>LOINC</th>
-                    <th>Result</th>
-                    <th>Unit</th>
-                    <th>Reference Range</th>
-                  </tr>
-                </thead>
-                <tbody id="observationsBody">
-                  <tr><td colspan="5">No observations loaded.</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-
-        <!-- FHIR Format (Raw JSON) with Collapsible Dropdown -->
-        <section class="card raw-card" id="rawJsonSection">
-          <details id="rawJsonDetails" class="raw-json-details">
-            <summary class="raw-header" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;user-select:none">
-              <div style="display:flex;align-items:center;gap:10px">
-                <span class="raw-toggle-arrow" style="display:inline-flex;transition:transform 0.2s">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </span>
-                <h2 style="margin:0;font-size:1.05rem">FHIR Format (Raw JSON)</h2>
-                <span style="font-size:0.75rem;padding:2px 8px;border-radius:4px;background:var(--bg-input);color:var(--text-muted);border:1px solid var(--border)">Dropdown (Click to view code)</span>
-              </div>
-              <button id="copyButton" class="secondary small" type="button" disabled onclick="event.stopPropagation()">Copy JSON</button>
-            </summary>
-            <div style="margin-top:14px">
-              <pre><code id="rawJson" class="language-json">{}</code></pre>
-            </div>
-          </details>
-        </section>
-      </div>
-
-      <!-- ═══ TAB: Patient Records ═══ -->
-      <div class="tab-panel" id="tab-patients">
-        <section class="card">
-          <div class="section-header">
-            <h2 id="patientsSectionTitle">Patient Records</h2>
-            <button id="refreshPatientsBtn" class="secondary small" type="button">Refresh</button>
-          </div>
-          <div id="patientsList" class="patients-grid">
-            <p class="muted">No patients recorded yet. Upload lab reports to populate.</p>
-          </div>
-        </section>
-
-        <section id="patientDetail" class="card patient-report-card" hidden>
-          <div class="section-header" style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px">
-            <h2 id="patientDetailName">Clinical Diagnostic Report (HL7® FHIR® R4)</h2>
-            <button id="closePatientDetailBtn" class="secondary small" type="button">Close Report</button>
-          </div>
-          <div id="patientDetailContent"></div>
-        </section>
+        </div>
       </div>
 
     </main>
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="{{ url_for('static', filename='app.js') }}?v=2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=3"></script>
   </body>
 </html>

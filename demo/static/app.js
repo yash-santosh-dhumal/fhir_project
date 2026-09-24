@@ -25,29 +25,24 @@ const dbStats     = $("#dbStats");
 
 let selectedFile = null;
 
-// ── Portal Mode ──
+// ── Portal Authentication & State ──
 let portalMode = "hospital"; // "hospital" or "insurance"
+let currentAuth = null;
+let currentAdjudicatePatientId = null;
+let selectedPolicyFile = null;
+let selectedSamplePolicyFilename = null;
+
 function apiBase() {
   return portalMode === "insurance" ? "/api/insurance" : "/api";
 }
 
 // ═══════════════════════════════════════════════
-// Tab Navigation
+// Tab Navigation & Lifecycle
 // ═══════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Portal switcher
-  const portalBtns = $$("[data-portal]");
-  portalBtns.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const newMode = btn.dataset.portal;
-      if (newMode === portalMode) return;
-      portalMode = newMode;
-      portalBtns.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      switchPortal(newMode);
-    });
-  });
+  // Check auth session
+  initAuth();
 
   // Tab switching
   $$(".tab-btn").forEach((btn) => {
@@ -63,6 +58,93 @@ document.addEventListener("DOMContentLoaded", () => {
       if (btn.dataset.tab === "explorer") loadBundles();
     });
   });
+
+  // Login forms & quick demo buttons
+  const btnSubmitHosp = $("#btnSubmitHospital");
+  const formHosp = $("#formLoginHospital");
+  if (btnSubmitHosp) {
+    btnSubmitHosp.addEventListener("click", () => {
+      const u = $("#hospitalUsername")?.value || "";
+      const p = $("#hospitalPassword")?.value || "";
+      doLogin("hospital", u, p, "#hospitalLoginError");
+    });
+  }
+  if (formHosp) {
+    formHosp.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = $("#hospitalUsername")?.value || "";
+      const p = $("#hospitalPassword")?.value || "";
+      doLogin("hospital", u, p, "#hospitalLoginError");
+    });
+  }
+  const btnQuickHosp = $("#btnQuickHospital");
+  if (btnQuickHosp) {
+    btnQuickHosp.addEventListener("click", () => {
+      if ($("#hospitalUsername")) $("#hospitalUsername").value = "hospital_admin";
+      if ($("#hospitalPassword")) $("#hospitalPassword").value = "hospital123";
+      doLogin("hospital", "hospital_admin", "hospital123", "#hospitalLoginError");
+    });
+  }
+
+  const btnSubmitIns = $("#btnSubmitInsurance");
+  const formIns = $("#formLoginInsurance");
+  if (btnSubmitIns) {
+    btnSubmitIns.addEventListener("click", () => {
+      const u = $("#insuranceUsername")?.value || "";
+      const p = $("#insurancePassword")?.value || "";
+      doLogin("insurance", u, p, "#insuranceLoginError");
+    });
+  }
+  if (formIns) {
+    formIns.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = $("#insuranceUsername")?.value || "";
+      const p = $("#insurancePassword")?.value || "";
+      doLogin("insurance", u, p, "#insuranceLoginError");
+    });
+  }
+  const btnQuickIns = $("#btnQuickInsurance");
+  if (btnQuickIns) {
+    btnQuickIns.addEventListener("click", () => {
+      if ($("#insuranceUsername")) $("#insuranceUsername").value = "insurance_auditor";
+      if ($("#insurancePassword")) $("#insurancePassword").value = "insurance123";
+      doLogin("insurance", "insurance_auditor", "insurance123", "#insuranceLoginError");
+    });
+  }
+
+  // Logout / Switch Portal button
+  const logoutBtn = $("#logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", doLogout);
+  }
+
+  // Policy upload modal triggers & inputs
+  const closePolicyModalBtn = $("#closePolicyModalBtn");
+  const cancelPolicyModalBtn = $("#cancelPolicyModalBtn");
+  if (closePolicyModalBtn) closePolicyModalBtn.addEventListener("click", closePolicyUploadModal);
+  if (cancelPolicyModalBtn) cancelPolicyModalBtn.addEventListener("click", closePolicyUploadModal);
+
+  const policyDropZone = $("#policyDropZone");
+  const policyFileInput = $("#policyFileInput");
+  if (policyDropZone && policyFileInput) {
+    policyDropZone.addEventListener("click", () => policyFileInput.click());
+    policyFileInput.addEventListener("change", onPolicyFileSelected);
+    policyDropZone.addEventListener("dragover", (e) => { e.preventDefault(); policyDropZone.classList.add("dragover"); });
+    policyDropZone.addEventListener("dragleave", () => policyDropZone.classList.remove("dragover"));
+    policyDropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      policyDropZone.classList.remove("dragover");
+      if (e.dataTransfer.files.length) {
+        policyFileInput.files = e.dataTransfer.files;
+        onPolicyFileSelected();
+      }
+    });
+  }
+
+  const submitPolicyModalBtn = $("#submitPolicyModalBtn");
+  if (submitPolicyModalBtn) {
+    submitPolicyModalBtn.addEventListener("click", submitPolicyAdjudication);
+  }
 
   // File upload
   browseButton.addEventListener("click", () => fileInput.click());
@@ -107,7 +189,88 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 // ═══════════════════════════════════════════════
-// Portal Switching
+// Authentication & Portal Access Control
+// ═══════════════════════════════════════════════
+
+function initAuth() {
+  const sessionStr = sessionStorage.getItem("portal_auth");
+  if (sessionStr) {
+    try {
+      const auth = JSON.parse(sessionStr);
+      if (auth && (auth.role === "hospital" || auth.role === "insurance")) {
+        applyPortalAuth(auth);
+        return;
+      }
+    } catch {}
+  }
+  showLoginView();
+}
+
+function showLoginView() {
+  const loginView = $("#loginView");
+  const appMain = $("#appMain");
+  if (loginView) loginView.hidden = false;
+  if (appMain) appMain.hidden = true;
+}
+
+function applyPortalAuth(auth) {
+  currentAuth = auth;
+  portalMode = auth.role || "hospital";
+
+  const loginView = $("#loginView");
+  const appMain = $("#appMain");
+  if (loginView) loginView.hidden = true;
+  if (appMain) appMain.hidden = false;
+
+  switchPortal(portalMode);
+
+  // Auto-switch to Patient Records tab for Insurance portal to immediately display hospital dossiers
+  if (portalMode === "insurance") {
+    const tabPatients = $("#tabBtnPatients");
+    if (tabPatients) tabPatients.click();
+  } else {
+    const tabUpload = $("#tabBtnUpload");
+    if (tabUpload) tabUpload.click();
+  }
+}
+
+async function doLogin(role, username, password, errElId) {
+  const errEl = $(errElId);
+  if (errEl) {
+    errEl.hidden = true;
+    errEl.textContent = "";
+  }
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Authentication failed. Check credentials.");
+    }
+    sessionStorage.setItem("portal_auth", JSON.stringify(data.user));
+    applyPortalAuth(data.user);
+  } catch (err) {
+    if (errEl) {
+      errEl.hidden = false;
+      errEl.textContent = err.message;
+    }
+  }
+}
+
+async function doLogout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch {}
+  sessionStorage.removeItem("portal_auth");
+  showLoginView();
+}
+
+
+// ═══════════════════════════════════════════════
+// Portal Switching & UI Reconfiguration
 // ═══════════════════════════════════════════════
 
 function switchPortal(mode) {
@@ -118,30 +281,44 @@ function switchPortal(mode) {
     body.classList.remove("portal-insurance");
   }
 
+  // Update session bar user info
+  const activePortalTitle = $("#activePortalTitle");
+  const activeUserName = $("#activeUserName");
+  const activeUserRole = $("#activeUserRole");
+  if (mode === "insurance") {
+    if (activePortalTitle) activePortalTitle.textContent = currentAuth?.portal_label || "Health Insurance Claims Authority (TPA)";
+    if (activeUserName) activeUserName.textContent = currentAuth?.display_name || "K. V. Raman";
+    if (activeUserRole) activeUserRole.textContent = currentAuth?.role_title || "Senior Claims Auditor & TPA";
+  } else {
+    if (activePortalTitle) activePortalTitle.textContent = currentAuth?.portal_label || "Hospital Information System (HIS)";
+    if (activeUserName) activeUserName.textContent = currentAuth?.display_name || "Dr. R. Sharma";
+    if (activeUserRole) activeUserRole.textContent = currentAuth?.role_title || "Hospital Administrator & Clinician";
+  }
+
   // Update header branding
   const eyebrow = $("#heroEyebrow");
   const title = $("#heroTitle");
   const subtitle = $("#heroSubtitle");
   if (mode === "insurance") {
-    if (eyebrow) eyebrow.textContent = "Insurance Claim Company Portal";
-    if (title) title.textContent = "Insurance FHIR Dashboard";
-    if (subtitle) subtitle.textContent = "Extract, validate, and store ABDM FHIR R4 data from insurance claim documents.";
+    if (eyebrow) eyebrow.textContent = "Health Insurance Claims Authority (TPA)";
+    if (title) title.textContent = "Insurance Adjudication & Claims Portal";
+    if (subtitle) subtitle.textContent = "Review hospital-submitted patient files, upload insurance policies, auto-adjudicate coverage, and generate settlement reports.";
   } else {
     if (eyebrow) eyebrow.textContent = "Google Health Medical Data Toolkit";
-    if (title) title.textContent = "FHIR Dashboard";
-    if (subtitle) subtitle.textContent = "Extract, validate, and store ABDM FHIR R4 data from hospital laboratory reports.";
+    if (title) title.textContent = "Hospital Information System (HIS)";
+    if (subtitle) subtitle.textContent = "Upload patient records & laboratory tests, convert legacy records to ABDM FHIR R4, and review patient clinical summaries & bills.";
   }
 
   // Update tab labels
   const tabPatients = $("#tabBtnPatients");
-  if (tabPatients) tabPatients.textContent = mode === "insurance" ? "Claims Reports" : "Patient Records";
+  if (tabPatients) tabPatients.textContent = mode === "insurance" ? "Claims & Patient Records" : "Patient Records";
 
   // Update upload card text
   const uploadTitle = $("#uploadCardTitle");
   const uploadDesc = $("#uploadCardDesc");
   if (mode === "insurance") {
-    if (uploadTitle) uploadTitle.textContent = "Upload Claim Document or ZIP Archive";
-    if (uploadDesc) uploadDesc.innerHTML = 'Upload an insurance claim document (PDF/image) or a <strong>ZIP archive containing all claim documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR claim record.';
+    if (uploadTitle) uploadTitle.textContent = "Upload Claim Document or Policy File";
+    if (uploadDesc) uploadDesc.innerHTML = 'Upload an insurance claim document, policy certificate, or ZIP archive to extract FHIR insurance plan and claim coverage.';
   } else {
     if (uploadTitle) uploadTitle.textContent = "Upload Patient Document or ZIP Archive";
     if (uploadDesc) uploadDesc.innerHTML = 'Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.';
@@ -153,13 +330,13 @@ function switchPortal(mode) {
 
   // Update patient records / claims reports section
   const sectionTitle = $("#patientsSectionTitle");
-  if (sectionTitle) sectionTitle.textContent = mode === "insurance" ? "Claims Reports" : "Patient Records";
+  if (sectionTitle) sectionTitle.textContent = mode === "insurance" ? "Claims & Patient Records" : "Patient Records";
 
   // Update empty state text
   const patientsList = $("#patientsList");
   if (patientsList && patientsList.querySelector(".muted")) {
     patientsList.querySelector(".muted").textContent = mode === "insurance"
-      ? "No claims recorded yet. Upload claim documents to populate."
+      ? "No patient records received from hospital yet. Upload patient archives from hospital side to populate."
       : "No patients recorded yet. Upload lab reports to populate.";
   }
 
@@ -195,6 +372,218 @@ function switchPortal(mode) {
   // Refresh health/stats for new portal
   checkHealth();
 }
+
+
+// ═══════════════════════════════════════════════
+// Policy Document Upload & Claim Adjudication Modal
+// ═══════════════════════════════════════════════
+
+function openPolicyUploadModal(patientId, patientName, billedAmount, currentStatus) {
+  currentAdjudicatePatientId = patientId;
+  selectedPolicyFile = null;
+  selectedSamplePolicyFilename = null;
+
+  const modal = $("#policyUploadModal");
+  if (!modal) return;
+
+  const nameEl = $("#modalCtxPatientName");
+  const idEl = $("#modalCtxHospId");
+  const billEl = $("#modalCtxBillAmount");
+  const statusEl = $("#modalCtxStatus");
+
+  if (nameEl) nameEl.textContent = patientName || "Patient Record";
+  if (idEl) idEl.textContent = patientId || "—";
+  if (billEl) billEl.textContent = billedAmount ? `₹${Number(billedAmount).toLocaleString("en-IN", {minimumFractionDigits: 2})}` : "₹0.00";
+  if (statusEl) statusEl.textContent = currentStatus || "Pending Policy Upload";
+
+  const pInput = $("#policyFileInput");
+  if (pInput) pInput.value = "";
+  const infoEl = $("#policySelectedFileInfo");
+  if (infoEl) {
+    infoEl.hidden = true;
+    infoEl.innerHTML = "";
+  }
+  const errBox = $("#modalErrorBox");
+  if (errBox) {
+    errBox.hidden = true;
+    errBox.textContent = "";
+  }
+  const progBox = $("#adjudicationProgress");
+  if (progBox) progBox.hidden = true;
+
+  const submitBtn = $("#submitPolicyModalBtn");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submit & Adjudicate Claim →";
+  }
+  const cancelBtn = $("#cancelPolicyModalBtn");
+  if (cancelBtn) cancelBtn.disabled = false;
+
+  loadSamplePolicies(patientId);
+  modal.hidden = false;
+}
+
+function closePolicyUploadModal() {
+  const modal = $("#policyUploadModal");
+  if (modal) modal.hidden = true;
+  currentAdjudicatePatientId = null;
+  selectedPolicyFile = null;
+  selectedSamplePolicyFilename = null;
+}
+
+async function loadSamplePolicies(patientId) {
+  const container = $("#samplePolicyButtons");
+  if (!container) return;
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0">Loading sample policy documents...</div>';
+
+  try {
+    const res = await fetch("/api/insurance/sample-policies");
+    if (!res.ok) throw new Error("Could not fetch sample policies.");
+    const list = await res.json();
+    if (!list || !list.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">No sample policies found on server.</div>';
+      return;
+    }
+
+    container.innerHTML = list.map((item) => {
+      const isMatch = patientId && item.filename.includes(patientId);
+      return `
+        <button type="button" class="sample-policy-item-btn ${isMatch ? 'recommended' : ''}" data-filename="${escapeHtml(item.filename)}" onclick="selectSamplePolicy('${escapeHtml(item.filename)}')">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:1.15rem">📄</span>
+            <div>
+              <span class="sp-item-name">${escapeHtml(item.filename)}</span>
+              <span class="sp-item-hint">${escapeHtml(item.patient_hint)} • ${item.size_kb} KB</span>
+            </div>
+          </div>
+          ${isMatch ? '<span class="status-badge online" style="font-size:0.68rem;padding:2px 8px">Patient Match</span>' : '<span style="color:var(--text-muted);font-size:0.75rem">Select</span>'}
+        </button>
+      `;
+    }).join("");
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem">Sample policies error: ${err.message}</div>`;
+  }
+}
+
+function selectSamplePolicy(filename) {
+  selectedSamplePolicyFilename = filename;
+  selectedPolicyFile = null;
+
+  $$("#samplePolicyButtons .sample-policy-item-btn").forEach((btn) => {
+    if (btn.dataset.filename === filename) {
+      btn.classList.add("selected");
+    } else {
+      btn.classList.remove("selected");
+    }
+  });
+
+  const infoEl = $("#policySelectedFileInfo");
+  if (infoEl) {
+    infoEl.hidden = false;
+    infoEl.innerHTML = `<span>✓ Selected Policy Document: <strong>${escapeHtml(filename)}</strong></span>`;
+  }
+
+  const submitBtn = $("#submitPolicyModalBtn");
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = `Submit & Adjudicate (${filename.slice(0, 24)}...) →`;
+  }
+}
+
+function onPolicyFileSelected() {
+  const pInput = $("#policyFileInput");
+  if (pInput && pInput.files.length) {
+    selectedPolicyFile = pInput.files[0];
+    selectedSamplePolicyFilename = null;
+    $$("#samplePolicyButtons .sample-policy-item-btn").forEach((b) => b.classList.remove("selected"));
+
+    const infoEl = $("#policySelectedFileInfo");
+    if (infoEl) {
+      infoEl.hidden = false;
+      const sizeKB = (selectedPolicyFile.size / 1024).toFixed(1);
+      infoEl.innerHTML = `<span>✓ Uploaded Document: <strong>${escapeHtml(selectedPolicyFile.name)}</strong> (${sizeKB} KB)</span>`;
+    }
+
+    const submitBtn = $("#submitPolicyModalBtn");
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = `Submit & Adjudicate (${selectedPolicyFile.name.slice(0, 24)}...) →`;
+    }
+  }
+}
+
+async function submitPolicyAdjudication() {
+  if (!currentAdjudicatePatientId) return;
+  if (!selectedPolicyFile && !selectedSamplePolicyFilename) {
+    alert("Please select or upload an insurance policy document first.");
+    return;
+  }
+
+  const submitBtn = $("#submitPolicyModalBtn");
+  const cancelBtn = $("#cancelPolicyModalBtn");
+  const progBox = $("#adjudicationProgress");
+  const statusTxt = $("#adjudicationStatusText");
+  const errBox = $("#modalErrorBox");
+
+  if (errBox) {
+    errBox.hidden = true;
+    errBox.textContent = "";
+  }
+  if (submitBtn) submitBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (progBox) progBox.hidden = false;
+  if (statusTxt) statusTxt.textContent = "Analyzing Policy Document with Gemini Vision OCR & Extracting Terms...";
+
+  const targetPatientId = currentAdjudicatePatientId;
+
+  try {
+    let res;
+    if (selectedSamplePolicyFilename) {
+      res = await fetch(`/api/insurance/patients/${targetPatientId}/adjudicate-sample-policy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policy_filename: selectedSamplePolicyFilename }),
+      });
+    } else {
+      const formData = new FormData();
+      formData.append("file", selectedPolicyFile);
+      if (statusTxt) statusTxt.textContent = "Extracting Policy Rules & Calculating Co-pay against Hospital Bill...";
+      res = await fetch(`/api/insurance/patients/${targetPatientId}/adjudicate-policy`, {
+        method: "POST",
+        body: formData,
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || `Adjudication HTTP ${res.status}`);
+    }
+
+    if (statusTxt) statusTxt.textContent = "Claim Adjudicated Successfully! Updating ABDM FHIR Resources...";
+
+    setTimeout(async () => {
+      closePolicyUploadModal();
+      await loadPatients();
+      await viewPatient(targetPatientId);
+    }, 600);
+
+  } catch (err) {
+    if (progBox) progBox.hidden = true;
+    if (submitBtn) submitBtn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (errBox) {
+      errBox.hidden = false;
+      errBox.textContent = `Adjudication Error: ${err.message}`;
+    }
+  }
+}
+
+// Global modal exposure
+window.openPolicyUploadModal = openPolicyUploadModal;
+window.closePolicyUploadModal = closePolicyUploadModal;
+window.selectSamplePolicy = selectSamplePolicy;
+window.loadSamplePolicies = loadSamplePolicies;
+window.submitPolicyAdjudication = submitPolicyAdjudication;
 
 
 // ═══════════════════════════════════════════════
@@ -922,7 +1311,7 @@ async function loadPatients() {
     const res = await fetch(`${apiBase()}/patients`);
     const patients = await res.json();
     if (!patients.length) {
-      container.innerHTML = `<p class="muted">${portalMode === "insurance" ? "No claims recorded yet. Upload claim documents to populate." : "No patients recorded yet. Upload patient archives or lab reports to populate."}</p>`;
+      container.innerHTML = `<p class="muted">${portalMode === "insurance" ? "No patient records or claims recorded yet. Upload patient archives from hospital side to populate." : "No patients recorded yet. Upload patient archives or lab reports to populate."}</p>`;
       return;
     }
     container.innerHTML = patients.map((p) => {
@@ -935,11 +1324,71 @@ async function loadPatients() {
       }
       if (pAge) metaParts.push(pAge);
 
+      const billedStr = p.billed_amount ? `₹${Number(p.billed_amount).toLocaleString("en-IN", {minimumFractionDigits: 2})}` : "₹0.00";
+      const insuredStr = p.insured_amount ? `₹${Number(p.insured_amount).toLocaleString("en-IN", {minimumFractionDigits: 2})}` : "₹0.00";
+      const payableStr = p.patient_payable ? `₹${Number(p.patient_payable).toLocaleString("en-IN", {minimumFractionDigits: 2})}` : "₹0.00";
+
+      let statusBadgeHtml = "";
+      if (p.is_adjudicated) {
+        statusBadgeHtml = `
+          <span class="pc-badge status-approved" style="background:rgba(16,185,129,0.16);color:#34d399;border:1px solid rgba(16,185,129,0.35);font-weight:600">
+            🛡️ ${escapeHtml(p.adjudication_status || "Approved")}
+          </span>
+        `;
+      } else {
+        statusBadgeHtml = `
+          <span class="pc-badge status-pending" style="background:rgba(234,179,8,0.16);color:#facc15;border:1px solid rgba(234,179,8,0.35);font-weight:600">
+            ⏳ Awaiting Insurance Policy
+          </span>
+        `;
+      }
+
+      let actionBlockHtml = "";
+      if (portalMode === "insurance") {
+        if (!p.is_adjudicated) {
+          actionBlockHtml = `
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+              <button class="primary insurance-btn-glow" style="width:100%;padding:8px 12px;font-size:0.8rem;display:flex;align-items:center;justify-content:center;gap:6px" onclick="event.stopPropagation(); openPolicyUploadModal('${p.id}', '${escapeHtml(p.name || '')}', ${p.billed_amount || 0}, '${escapeHtml(p.adjudication_status || '')}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="12" y2="12"></line><line x1="15" y1="15" x2="12" y2="12"></line></svg>
+                <span>Upload Policy Document &rarr;</span>
+              </button>
+            </div>
+          `;
+        } else {
+          actionBlockHtml = `
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:6px">
+              <button class="primary" style="flex:1;padding:6px 10px;font-size:0.75rem" onclick="event.stopPropagation(); viewPatient('${p.id}')">
+                View Report
+              </button>
+              <button class="secondary" title="Re-adjudicate with new policy" style="padding:6px 10px;font-size:0.75rem" onclick="event.stopPropagation(); openPolicyUploadModal('${p.id}', '${escapeHtml(p.name || '')}', ${p.billed_amount || 0}, '${escapeHtml(p.adjudication_status || '')}')">
+                🔄 Re-adjudicate
+              </button>
+            </div>
+          `;
+        }
+      } else {
+        // Hospital mode
+        if (p.is_adjudicated) {
+          actionBlockHtml = `
+            <div style="margin-top:8px;font-size:0.74rem;color:#34d399;display:flex;align-items:center;gap:5px;font-weight:600">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>Insurance Claim Settled: ₹${Number(p.insured_amount).toLocaleString("en-IN")} covered</span>
+            </div>
+          `;
+        } else {
+          actionBlockHtml = `
+            <div style="margin-top:8px;font-size:0.74rem;color:#facc15;display:flex;align-items:center;gap:5px">
+              <span>⏳ Sent to TPA for policy settlement</span>
+            </div>
+          `;
+        }
+      }
+
       return `
         <div class="patient-card" onclick="viewPatient('${p.id}')">
           <div class="pc-header">
             <div class="pc-name">${escapeHtml(p.name || (portalMode === "insurance" ? "Unknown Claimant" : "Unknown Patient"))}</div>
-            <button class="pc-delete-btn" title="Delete ${portalMode === "insurance" ? "Claim" : "Patient"} Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
+            <button class="pc-delete-btn" title="Delete Record" onclick="event.stopPropagation(); deletePatient('${p.id}', '${escapeHtml(p.name || '')}')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -947,9 +1396,15 @@ async function loadPatients() {
             </button>
           </div>
           <div class="pc-meta">${escapeHtml(metaParts.join(" • ") || "Patient Record")}</div>
-          <div class="pc-badges">
-            <span class="pc-badge">${p.bundle_count || 0} Report${p.bundle_count !== 1 ? "s" : ""}</span>
+          <div style="margin:8px 0;display:flex;align-items:center;justify-content:space-between;font-size:0.8rem">
+            <span style="color:var(--text-muted)">Hospital Bill:</span>
+            <strong style="color:var(--text-primary);font-size:0.92rem">${billedStr}</strong>
           </div>
+          <div class="pc-badges" style="display:flex;flex-wrap:wrap;gap:6px">
+            <span class="pc-badge">${p.bundle_count || 0} Report${p.bundle_count !== 1 ? "s" : ""}</span>
+            ${statusBadgeHtml}
+          </div>
+          ${actionBlockHtml}
         </div>
       `;
     }).join("");
@@ -1204,7 +1659,7 @@ async function viewPatient(patientId) {
       const sourceFilename = selectedBundle.source_filename || "Archive / Document";
       const practitionerName = practitioner.name?.[0]?.text || practitioner.name?.[0]?.family || "Attending Pathologist / Medical Officer";
 
-      // ── Insurance Portal: Route to Insurance Plan or Claim Report ──
+      // ── Insurance Portal: Route to Insurance Plan if standalone policy document ──
       if (portalMode === "insurance") {
         const insurancePlan = bundleJson.insurance_plan || resources.find((r) => r.resourceType === "InsurancePlan");
         if (insurancePlan) {
@@ -1221,25 +1676,6 @@ async function viewPatient(patientId) {
             validation: bundleJson.validation || { valid: true, python_valid: true, fhir_valid: true },
           });
           _wireInsurancePlanReportEvents(selectedBundle, bundleIdx, bundleJson, planObj.plan_name);
-          return;
-        } else {
-          if (nameEl) {
-            nameEl.textContent = `Insurance Claim Report \u2014 ${patient.name || "Claimant"}`;
-          }
-          content.innerHTML = _renderInsuranceOnePageReportHtml({
-            bundleIdx,
-            bundles,
-            selectedBundle,
-            bundleJson,
-            resources,
-            patient,
-            pName, pGiven, pFamily, pGender, pDob, pAge, pGuardian, pPhone, formattedAadhaar, pAbha, pHospId, pMrn,
-            pAddress, pLocality, pMandal, pCity, pDistrict, pState, pPin,
-            facilityName, practitionerName,
-            formattedDate, sourceFilename, docStatus,
-            claimSummary: bundleJson.claim_summary
-          });
-          _wireInsuranceReportEvents(selectedBundle, bundleIdx, bundleJson, pName);
           return;
         }
       }
@@ -1485,7 +1921,7 @@ async function viewPatient(patientId) {
       const insuranceSec = composition.section?.find((s) => s.title?.includes("Insurance Coverage"));
 
       let insuranceAdjudicationSectionHtml = "";
-      if (bundleCoverage || bundleClaimResponse || insuranceSec || bundleClaims.length > 0) {
+      if (bundleCoverage && bundleClaimResponse) {
         let policyNum = bundleCoverage?.subscriberId || bundleCoverage?.identifier?.[0]?.value || "";
         let schemeName = bundleCoverage?.payor?.[0]?.display || bundleCoverage?.type?.coding?.[0]?.display || "";
         let covType = bundleCoverage?.class?.[0]?.name || "";
@@ -1505,7 +1941,6 @@ async function viewPatient(patientId) {
           else if (codes.includes("patientoutoppocket") || codes.includes("copay")) patientPayable = val;
         });
 
-        // Robust fallbacks if bundle was created earlier or specific fields missing
         if (totalBilled === 0 && bundleClaims.length > 0) {
           const demoClaim = bundleClaims.find(c => {
             const sinfo = (c.supportingInfo || []).map(s => s.valueString || "").join(" ").toLowerCase();
@@ -1513,47 +1948,47 @@ async function viewPatient(patientId) {
           }) || bundleClaims[0];
           totalBilled = Number(demoClaim.total?.value || 0);
         }
-        if (!policyNum) policyNum = "WAP138200500121/04";
-        if (!schemeName || schemeName === "Health Insurance Scheme") schemeName = "Dr. YSR Aarogyasri / AB-PMJAY";
-        if (!preAuthRef) preAuthRef = "APTRUST/KNL/2025/1/13510681/07";
-        if (!sumInsured) sumInsured = "INR 25,00,000.00";
 
         if (insuredAmount === 0 && bundleClaimResponse?.payment?.amount?.value) {
           insuredAmount = Number(bundleClaimResponse.payment.amount.value);
-        }
-        if (insuredAmount === 0 && totalBilled > 0) {
-          insuredAmount = Math.round(totalBilled * 0.80);
-          patientPayable = Math.round(totalBilled - insuredAmount);
-        }
-        if (totalBilled === 42962 && (insuredAmount === 42962 || insuredAmount === 0) && patientPayable === 0) {
-          insuredAmount = 34370;
-          patientPayable = 8592;
         }
 
         const coveragePct = totalBilled > 0 ? Math.round((insuredAmount / totalBilled) * 100) : 80;
         const isFullyCashless = patientPayable === 0 && insuredAmount >= totalBilled && totalBilled > 0;
         const statusBadge = isFullyCashless ? "100% Cashless Approved" : (insuredAmount > 0 ? `Partially Insured (${coveragePct}% Approved)` : "Patient Liable");
 
-        if (totalBilled > 0 && (patientPayable > 0 || !dispositionText || dispositionText.includes("100%"))) {
+        if (!dispositionText && totalBilled > 0) {
           if (patientPayable > 0) {
-            dispositionText = `Hospital bill of INR ${totalBilled.toLocaleString("en-IN", {minimumFractionDigits: 2})} has approved coverage of INR ${insuredAmount.toLocaleString("en-IN", {minimumFractionDigits: 2})} (${coveragePct}%) under ${schemeName} (Policy #${policyNum}). Beneficiary co-payment liability is INR ${patientPayable.toLocaleString("en-IN", {minimumFractionDigits: 2})} (${100 - coveragePct}%).`;
+            dispositionText = `Hospital bill of INR ${totalBilled.toLocaleString("en-IN", {minimumFractionDigits: 2})} has approved coverage of INR ${insuredAmount.toLocaleString("en-IN", {minimumFractionDigits: 2})} (${coveragePct}%) under ${schemeName || "Health Insurance Scheme"}. Beneficiary co-payment liability is INR ${patientPayable.toLocaleString("en-IN", {minimumFractionDigits: 2})} (${100 - coveragePct}%).`;
           } else {
-            dispositionText = `Hospital bill of INR ${totalBilled.toLocaleString("en-IN", {minimumFractionDigits: 2})} is 100% covered and approved under ${schemeName} (Policy #${policyNum}). Beneficiary out-of-pocket payment is INR 0.00 (NIL).`;
+            dispositionText = `Hospital bill of INR ${totalBilled.toLocaleString("en-IN", {minimumFractionDigits: 2})} is 100% covered and approved under ${schemeName || "Health Insurance Scheme"}. Beneficiary out-of-pocket payment is INR 0.00 (NIL).`;
           }
         }
 
+        let reAdjudicateBtnHtml = "";
+        if (portalMode === "insurance") {
+          reAdjudicateBtnHtml = `
+            <button type="button" class="secondary" style="padding:4px 12px;font-size:0.75rem;margin-left:auto" onclick="openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled}, '${escapeHtml(statusBadge)}')">
+              🔄 Re-adjudicate Policy
+            </button>
+          `;
+        }
+
         insuranceAdjudicationSectionHtml = `
-          <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(16,185,129,0.3);background:linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 100%)">
-            <div class="clinical-section-header" style="border-bottom:1px solid rgba(16,185,129,0.2)">
+          <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(16,185,129,0.35);background:linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 100%)">
+            <div class="clinical-section-header" style="border-bottom:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;justify-content:space-between">
               <div class="clinical-section-title-wrap">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
                 <h4 style="color:#10b981;font-weight:700">Insurance Coverage &amp; Patient Settlement Analysis</h4>
               </div>
-              <span class="manifest-badge" style="background:rgba(16,185,129,0.18);color:#6ee7b7;border-color:rgba(16,185,129,0.4);font-weight:600">
-                🛡️ ${escapeHtml(statusBadge)}
-              </span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="manifest-badge" style="background:rgba(16,185,129,0.18);color:#6ee7b7;border-color:rgba(16,185,129,0.4);font-weight:600">
+                  🛡️ ${escapeHtml(statusBadge)}
+                </span>
+                ${reAdjudicateBtnHtml}
+              </div>
             </div>
 
             <!-- Key Metrics Row: 3 Hero Badges -->
@@ -1561,21 +1996,21 @@ async function viewPatient(patientId) {
               <!-- Card 1: Total Hospital Bill -->
               <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:0 2px 6px rgba(0,0,0,0.08)">
                 <div style="font-size:0.75rem;text-transform:uppercase;color:var(--text-muted);font-weight:600;letter-spacing:0.04em">Total Hospital Bill</div>
-                <div style="font-size:1.35rem;font-weight:800;color:var(--text-primary);margin-top:4px">₹${Number(totalBilled).toLocaleString("en-IN")}</div>
-                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">Gross Hospital Tariff Billed</div>
+                <div style="font-size:1.35rem;font-weight:800;color:var(--text-primary);margin-top:4px">₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</div>
+                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">Gross Hospital Tariff Invoiced</div>
               </div>
 
               <!-- Card 2: Amount Covered in Insurance -->
               <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.4);border-radius:10px;padding:14px 16px;box-shadow:0 2px 6px rgba(16,185,129,0.1)">
                 <div style="font-size:0.75rem;text-transform:uppercase;color:#34d399;font-weight:700;letter-spacing:0.04em">Amount Covered in Insurance</div>
-                <div style="font-size:1.35rem;font-weight:800;color:#10b981;margin-top:4px">₹${Number(insuredAmount).toLocaleString("en-IN")}</div>
+                <div style="font-size:1.35rem;font-weight:800;color:#10b981;margin-top:4px">₹${Number(insuredAmount).toLocaleString("en-IN", {minimumFractionDigits: 2})}</div>
                 <div style="font-size:0.72rem;color:#34d399;margin-top:2px">✓ ${coveragePct}% Paid by Insurance Scheme</div>
               </div>
 
               <!-- Card 3: Amount Patient Needs to Pay -->
               <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.4);border-radius:10px;padding:14px 16px;box-shadow:0 2px 6px rgba(239,68,68,0.1)">
                 <div style="font-size:0.75rem;text-transform:uppercase;color:#fca5a5;font-weight:700;letter-spacing:0.04em">Amount Patient Needs to Pay</div>
-                <div style="font-size:1.35rem;font-weight:800;color:${patientPayable === 0 ? '#60a5fa' : '#f87171'};margin-top:4px">₹${Number(patientPayable).toLocaleString("en-IN")}${patientPayable === 0 ? ' (NIL)' : ''}</div>
+                <div style="font-size:1.35rem;font-weight:800;color:${patientPayable === 0 ? '#60a5fa' : '#f87171'};margin-top:4px">₹${Number(patientPayable).toLocaleString("en-IN", {minimumFractionDigits: 2})}${patientPayable === 0 ? ' (NIL)' : ''}</div>
                 <div style="font-size:0.72rem;color:${patientPayable === 0 ? '#93c5fd' : '#fca5a5'};margin-top:2px">${patientPayable === 0 ? '✓ Zero Out-of-Pocket Expense' : `⚠️ ${100 - coveragePct}% Patient Co-Payment / Out-of-Pocket Due`}</div>
               </div>
             </div>
@@ -1597,6 +2032,72 @@ async function viewPatient(patientId) {
             ` : ""}
           </div>
         `;
+      } else {
+        // Not yet adjudicated!
+        let totalBilled = 0;
+        if (bundleClaims.length > 0) {
+          const demoClaim = bundleClaims.find(c => {
+            const sinfo = (c.supportingInfo || []).map(s => s.valueString || "").join(" ").toLowerCase();
+            return sinfo.includes("demo bill") || sinfo.includes("hospital_bill");
+          }) || bundleClaims[0];
+          totalBilled = Number(demoClaim.total?.value || 0);
+        }
+
+        if (portalMode === "insurance") {
+          insuranceAdjudicationSectionHtml = `
+            <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(99,102,241,0.4);background:linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(16,185,129,0.04) 100%)">
+              <div class="clinical-section-header" style="border-bottom:1px solid rgba(99,102,241,0.25)">
+                <div class="clinical-section-title-wrap">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="12" y1="18" x2="12" y2="12"></line>
+                  </svg>
+                  <h4 style="color:#a5b4fc;font-weight:700">Insurance Policy Adjudication Required</h4>
+                </div>
+                <span class="manifest-badge" style="background:rgba(99,102,241,0.18);color:#c7d2fe;border-color:rgba(99,102,241,0.4);font-weight:600">
+                  ⚡ TPA Action Required
+                </span>
+              </div>
+              <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+                <div style="max-width:560px">
+                  <p style="margin:0 0 6px 0;font-size:0.92rem;color:var(--text-primary)">
+                    Hospital has submitted verified clinical records and total bill of <strong style="color:#34d399">₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong>.
+                  </p>
+                  <p style="margin:0;font-size:0.8rem;color:var(--text-muted);line-height:1.4">
+                    Upload this patient's insurance policy document (PDF/Image) to auto-extract terms, sum insured, and compute approved coverage vs. patient co-payment liability.
+                  </p>
+                </div>
+                <button type="button" class="primary insurance-btn-glow" style="padding:10px 20px;font-size:0.88rem;display:flex;align-items:center;gap:8px" onclick="openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled})">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  <span>Upload Policy Document &amp; Adjudicate &rarr;</span>
+                </button>
+              </div>
+            </div>
+          `;
+        } else {
+          // Hospital mode
+          insuranceAdjudicationSectionHtml = `
+            <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(234,179,8,0.3);background:linear-gradient(135deg, rgba(234,179,8,0.06) 0%, rgba(15,23,42,0.4) 100%)">
+              <div class="clinical-section-header" style="border-bottom:1px solid rgba(234,179,8,0.2)">
+                <div class="clinical-section-title-wrap">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  <h4 style="color:#facc15;font-weight:700">Insurance Claim Adjudication Status</h4>
+                </div>
+                <span class="manifest-badge" style="background:rgba(234,179,8,0.18);color:#fde047;border-color:rgba(234,179,8,0.4);font-weight:600">
+                  ⏳ Pending TPA Policy Review
+                </span>
+              </div>
+              <div style="padding:14px 18px;font-size:0.86rem;line-height:1.5;color:var(--text-secondary)">
+                <p style="margin:0 0 6px 0">Hospital billed charges of <strong>₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong> have been unified into ABDM FHIR format and published to the Insurance Authority (TPA).</p>
+                <div style="font-size:0.78rem;color:var(--text-muted)">The approved coverage, TPA benefit calculations, and patient liability will automatically appear here once adjudicated by the insurance authority.</div>
+              </div>
+            </div>
+          `;
+        }
       }
 
       // Build Billing Section HTML - CONSOLIDATE ALL BILLS INTO ONE SINGLE SECTION

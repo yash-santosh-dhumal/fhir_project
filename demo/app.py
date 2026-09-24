@@ -78,7 +78,7 @@ SUPPORTED_MIME_TYPES = {
 
 app = Flask(__name__)
 fhir_store = FhirStore()
-insurance_store = FhirStore(db_path=_DEMO_DIR / "insurance_data.db")
+insurance_store = fhir_store
 log = logging.getLogger(__name__)
 
 
@@ -138,7 +138,7 @@ def _optimize_image_if_needed(file_bytes: bytes, mime_type: str) -> tuple[bytes,
   return file_bytes, mime_type
 
 
-def _do_convert(store: FhirStore):
+def _do_convert(store: FhirStore, skip_insurance: bool = True):
   """Shared conversion logic used by both hospital and insurance portals.
 
   Returns:
@@ -252,7 +252,12 @@ def _do_convert(store: FhirStore):
              analysis.document_count, len(candidate_lab_docs))
 
     with ThreadPoolExecutor(max_workers=2) as pipeline_executor:
-      gemini_future = pipeline_executor.submit(process_archive_documents_with_gemini, analysis.documents)
+      gemini_future = pipeline_executor.submit(
+          process_archive_documents_with_gemini,
+          analysis.documents,
+          5,
+          skip_insurance,
+      )
       toolkit_future = pipeline_executor.submit(_run_toolkit_for_docs, candidate_lab_docs)
 
       gemini_extraction = gemini_future.result()
@@ -381,7 +386,7 @@ def _do_convert(store: FhirStore):
           mime_type=mime_type,
           size_bytes=len(file_bytes),
       )
-      gemini_extraction = process_archive_documents_with_gemini([single_doc])
+      gemini_extraction = process_archive_documents_with_gemini([single_doc], 5, skip_insurance)
       master_bundle = unify_patient_bundles(
           [],
           archive_filename=uploaded.filename or "document",
@@ -449,11 +454,83 @@ def convert():
   return jsonify(data), status
 
 
-# ── Patient records ──
+# ── Patient records & Unified Adjudication ──
+
+def _get_enriched_patients_list() -> list[dict[str, Any]]:
+    """Returns all patients enriched with real-time billing and insurance adjudication status."""
+    patients = fhir_store.get_all_patients()
+    enriched: list[dict[str, Any]] = []
+    for p in patients:
+        p_dict = dict(p)
+        pid = p["id"]
+        bundles = fhir_store.get_bundles_for_patient(pid)
+        p_dict["billed_amount"] = 0.0
+        p_dict["bill_number"] = ""
+        p_dict["is_adjudicated"] = False
+        p_dict["insured_amount"] = 0.0
+        p_dict["patient_payable"] = 0.0
+        p_dict["coverage_percentage"] = 0.0
+        p_dict["adjudication_status"] = "Pending Policy Upload"
+        p_dict["scheme"] = ""
+        p_dict["policy_number"] = ""
+
+        if bundles:
+            try:
+                b_json = json.loads(bundles[0]["bundle_json"]) if isinstance(bundles[0].get("bundle_json"), str) else bundles[0].get("bundle_json", {})
+                entries = b_json.get("entry", [])
+                resources = [e.get("resource", {}) for e in entries if e.get("resource")]
+
+                # 1. Hospital Claim / Bill
+                claims = [r for r in resources if r.get("resourceType") == "Claim"]
+                if claims:
+                    demo_claim = next((
+                        c for c in claims
+                        if any("demo bill" in (s.get("valueString") or "").lower() or "hospital_bill" in (s.get("valueString") or "").lower() for s in c.get("supportingInfo", []))
+                    ), claims[0])
+                    p_dict["billed_amount"] = float(demo_claim.get("total", {}).get("value", 0.0) or 0.0)
+                    p_dict["bill_number"] = demo_claim.get("id", "")
+
+                # 2. Coverage
+                cov = next((r for r in resources if r.get("resourceType") == "Coverage"), None)
+                if cov:
+                    p_dict["policy_number"] = cov.get("subscriberId") or (cov.get("identifier", [{}])[0].get("value") if cov.get("identifier") else "")
+                    payor_list = cov.get("payor", [])
+                    p_dict["scheme"] = (payor_list[0].get("display") if payor_list else "") or (cov.get("type", {}).get("coding", [{}])[0].get("display") if cov.get("type") else "")
+
+                # 3. ClaimResponse
+                cr = next((r for r in resources if r.get("resourceType") == "ClaimResponse"), None)
+                if cr and cov:
+                    p_dict["is_adjudicated"] = True
+                    for tot in cr.get("total", []):
+                        codes = [c.get("code") for c in tot.get("category", {}).get("coding", [])]
+                        val = float(tot.get("amount", {}).get("value", 0.0) or 0.0)
+                        if "benefit" in codes:
+                            p_dict["insured_amount"] = val
+                        elif "patientoutoppocket" in codes or "copay" in codes:
+                            p_dict["patient_payable"] = val
+                        elif "submitted" in codes and p_dict["billed_amount"] == 0:
+                            p_dict["billed_amount"] = val
+
+                    if p_dict["billed_amount"] > 0:
+                        p_dict["coverage_percentage"] = round((p_dict["insured_amount"] / p_dict["billed_amount"]) * 100.0, 1)
+                        if p_dict["patient_payable"] == 0 and p_dict["insured_amount"] >= p_dict["billed_amount"]:
+                            p_dict["adjudication_status"] = "100% Cashless Approved"
+                        elif p_dict["insured_amount"] > 0:
+                            p_dict["adjudication_status"] = f"Partially Covered ({p_dict['coverage_percentage']}%)"
+                        else:
+                            p_dict["adjudication_status"] = "Not Covered"
+                    else:
+                        p_dict["adjudication_status"] = "Adjudicated"
+            except Exception as exc:
+                log.warning("Failed to enrich patient summary for %s: %s", pid, exc)
+
+        enriched.append(p_dict)
+    return enriched
+
 
 @app.get("/api/patients")
 def list_patients():
-    return jsonify(fhir_store.get_all_patients())
+    return jsonify(_get_enriched_patients_list())
 
 
 @app.get("/api/patients/<patient_id>")
@@ -463,146 +540,47 @@ def get_patient(patient_id: str):
         return _error("Patient not found.", 404)
     bundles = fhir_store.get_bundles_for_patient(patient_id)
     observations = fhir_store.get_observations_for_patient(patient_id)
-    # Ensure any bundle with bills has Coverage and ClaimResponse
-    for b in bundles:
-        try:
-            b_json = json.loads(b["bundle_json"]) if isinstance(b.get("bundle_json"), str) else b.get("bundle_json", {})
-            entries = b_json.get("entry", [])
-            resources = [e.get("resource", {}) for e in entries if e.get("resource")]
-            claims = [r for r in resources if r.get("resourceType") == "Claim"]
-            cov = next((r for r in resources if r.get("resourceType") == "Coverage"), None)
-            cr = next((r for r in resources if r.get("resourceType") == "ClaimResponse"), None)
-
-            needs_enrich = False
-            if claims and (not cov or not cr):
-                needs_enrich = True
-            elif cr:
-                tot_items = cr.get("total", [])
-                benefit = next((t.get("amount", {}).get("value") for t in tot_items if "benefit" in [c.get("code") for c in t.get("category", {}).get("coding", [])]), None)
-                if benefit == 42962.0:
-                    needs_enrich = True
-            if len(claims) > 1 and any("demo bill" in (s.get("valueString") or "").lower() or "hospital_bill" in (s.get("valueString") or "").lower() for c in claims for s in c.get("supportingInfo", [])):
-                needs_enrich = True
-
-            if needs_enrich:
-                _ensure_bundle_insurance(b_json, claims, resources, fhir_store, b["id"])
-                b["bundle_json"] = json.dumps(b_json)
-        except Exception as exc:
-            log.warning("Insurance auto-enrich failed for bundle %s: %s", b.get("id"), exc)
     return jsonify({"patient": patient, "bundles": bundles, "observations": observations})
 
 
-def _ensure_bundle_insurance(
-    b_json: dict[str, Any],
-    claims: list[dict[str, Any]],
-    resources: list[dict[str, Any]],
-    store: FhirStore,
-    bundle_id: str,
-) -> None:
-    """Enriches a bundle with ABDM Coverage and ClaimResponse matching policy document."""
+def _adjudicate_patient_with_policy(
+    patient_id: str,
+    policy: Any,
+    bundle_id: str | None = None,
+) -> dict[str, Any]:
+    """Adjudicates patient's hospital bills against an insurance policy and updates FHIR resources."""
     from demo.fhir_unifier import (
         _build_coverage_resource,
         _build_claim_response_resource,
         _adjudicate_bill_against_policy,
     )
-    from demo.gemini_ocr import ExtractedInsurancePolicy, ExtractedBillingData, ExtractedBillingItem
+    from demo.gemini_ocr import ExtractedBillingData, ExtractedBillingItem
 
-    # Try to reconstruct the insurance policy from existing Coverage/ClaimResponse in the bundle
-    existing_cov = next((r for r in resources if r.get("resourceType") == "Coverage"), None)
-    policy = None
-    if existing_cov:
-        # Extract policy details from the Coverage resource
-        payor_name = ""
-        payors = existing_cov.get("payor", [])
-        if payors and isinstance(payors[0], dict):
-            payor_name = payors[0].get("display", "")
-        
-        cov_class = existing_cov.get("class", [])
-        policy_num = ""
-        copay_pct = 0.0
-        covered_cats = []
-        terms = ""
-        sum_insured = 0.0
-        for cls_item in cov_class:
-            code = cls_item.get("type", {}).get("coding", [{}])[0].get("code", "")
-            val = cls_item.get("value", "")
-            if code == "plan":
-                policy_num = val
-            elif code == "copay_percentage":
-                try:
-                    copay_pct = float(val)
-                except (ValueError, TypeError):
-                    pass
-            elif code == "sum_insured":
-                try:
-                    sum_insured = float(val)
-                except (ValueError, TypeError):
-                    pass
-            elif code == "covered_categories":
-                covered_cats = [c.strip() for c in val.split(",") if c.strip()]
-            elif code == "terms_and_rules":
-                terms = val
+    bundles = fhir_store.get_bundles_for_patient(patient_id)
+    if not bundles:
+        raise ValueError("No clinical bundle found for this patient.")
 
-        # Also try to get coverage_type from the type field
-        cov_type_coding = existing_cov.get("type", {}).get("coding", [{}])
-        coverage_type = cov_type_coding[0].get("display", "") if cov_type_coding else ""
+    target_bundle = None
+    if bundle_id:
+        target_bundle = next((b for b in bundles if b["id"] == bundle_id), None)
+    if not target_bundle:
+        target_bundle = bundles[0]
 
-        if policy_num or copay_pct > 0 or terms:
-            policy = ExtractedInsurancePolicy(
-                policy_number=policy_num,
-                scheme_or_insurer=payor_name or "Insurance Policy",
-                copayment_percentage=copay_pct,
-                coverage_type=coverage_type,
-                annual_sum_insured=sum_insured,
-                covered_categories=covered_cats,
-                terms_and_rules=terms,
-                source_document="Extracted from FHIR Coverage resource",
-            )
+    b_id = target_bundle["id"]
+    b_json = json.loads(target_bundle["bundle_json"]) if isinstance(target_bundle.get("bundle_json"), str) else target_bundle.get("bundle_json", {})
+    entries = b_json.get("entry", [])
+    resources = [e.get("resource", {}) for e in entries if e.get("resource")]
+    claims = [r for r in resources if r.get("resourceType") == "Claim"]
+    if not claims:
+        raise ValueError("No hospital bill (Claim resource) found in patient record.")
 
-    # Fallback: use default policy if no policy data found in bundle
-    if not policy:
-        policy = ExtractedInsurancePolicy(
-            policy_number="WAP138200500121/04",
-            scheme_or_insurer="Dr. YSR Aarogyasri / AB-PMJAY",
-            health_card_number="10116903095-04",
-            claim_or_preauth_number="APTRUST/KNL/2025/1/13510681/07",
-            policy_status="Active",
-            annual_sum_insured=2500000.0,
-            copayment_liability=0.0,
-            copayment_percentage=20.0,
-            coverage_type="Co-Pay Health Assurance Scheme (80:20 Risk-Sharing)",
-            pre_auth_approved_amount=0.0,
-            patient_out_of_pocket=0.0,
-            covered_categories=[
-                "In-Patient Hospitalization",
-                "ICU & Critical Care",
-                "Medical & Surgical Oncology",
-                "Day Care Treatment",
-                "Pre and Post-Hospitalization",
-                "Pharmacy & Medications",
-                "Room & Board",
-                "Professional Fees",
-                "Investigations",
-                "Surgical / Procedures",
-            ],
-            terms_and_rules="Claims adjudicated under 80% Insurer Underwritten and 20% Beneficiary Co-Payment Schedule.",
-            source_document="demo claims/Insurance_Policy_Document_AP12363098.pdf",
-        )
-    p_res = next((r for r in resources if r.get("resourceType") == "Patient"), None)
-    pref = f"urn:uuid:{p_res['id']}" if p_res else "urn:uuid:patient"
-    org_res = next((r for r in resources if r.get("resourceType") == "Organization"), None)
-    oref = f"urn:uuid:{org_res['id']}" if org_res else "urn:uuid:org"
-
-    # Filter claims to keep ONLY the demo bill as the final bill
     demo_claims = [
         c for c in claims
         if any("demo bill" in (s.get("valueString") or "").lower() or "hospital_bill" in (s.get("valueString") or "").lower() for s in c.get("supportingInfo", []))
     ]
-    target_claim = demo_claims[0] if demo_claims else (claims[0] if claims else None)
-    if not target_claim:
-        return
+    target_claim = demo_claims[0] if demo_claims else claims[0]
 
-    # If multiple claims exist and demo claim was found, prune other claims
+    # Prune other claims if demo bill found
     if demo_claims and len(claims) > 1:
         valid_claim_ids = {target_claim["id"]}
         b_json["entry"] = [
@@ -615,16 +593,20 @@ def _ensure_bundle_insurance(
                 if "Billing" in s.get("title", ""):
                     s["entry"] = [{"reference": f"urn:uuid:{target_claim['id']}"}]
 
-    # Remove existing Coverage and ClaimResponse so they are cleanly recreated
+    # Clean existing Coverage and ClaimResponse
     b_json["entry"] = [
         e for e in b_json.get("entry", [])
         if e.get("resource", {}).get("resourceType") not in ("Coverage", "ClaimResponse")
     ]
 
-    cov_res = _build_coverage_resource(policy, pref, oref)
-    bill_total = float(target_claim.get("total", {}).get("value", 42962.0) or 42962.0)
+    p_res = next((r for r in resources if r.get("resourceType") == "Patient"), None)
+    pref = f"urn:uuid:{p_res['id']}" if p_res else f"urn:uuid:{patient_id}"
+    org_res = next((r for r in resources if r.get("resourceType") == "Organization"), None)
+    oref = f"urn:uuid:{org_res['id']}" if org_res else "urn:uuid:org"
 
-    # Extract bill items from the Claim resource for category-based adjudication
+    cov_res = _build_coverage_resource(policy, pref, oref)
+    bill_total = float(target_claim.get("total", {}).get("value", 0.0) or 0.0)
+
     bill_items = []
     for item in target_claim.get("item", []):
         cat = item.get("category", {}).get("coding", [{}])[0].get("display", "General")
@@ -641,11 +623,13 @@ def _ensure_bundle_insurance(
         ExtractedBillingData(
             bill_number=target_claim.get("id", "BILL"),
             total_amount=bill_total,
-            source_document="demo bill/Hospital_Bill_AP12363098.pdf",
+            source_document=getattr(policy, "source_document", "") or "Hospital_Bill",
             items=bill_items,
         )
     ]
+
     adj = _adjudicate_bill_against_policy(bill_data, policy)
+    adj["insurer_name"] = adj.get("scheme_or_insurer") or getattr(policy, "scheme_or_insurer", "") or "Insurance Scheme"
     claim_res = _build_claim_response_resource(
         claim_ref=f"urn:uuid:{target_claim['id']}",
         coverage_ref=f"urn:uuid:{cov_res['id']}",
@@ -681,7 +665,191 @@ def _ensure_bundle_insurance(
                 ),
             },
         })
-    store.update_bundle_json(bundle_id, json.dumps(b_json))
+
+    fhir_store.update_bundle_json(b_id, json.dumps(b_json))
+
+    return {
+        "adjudication": adj,
+        "policy": policy.to_dict() if hasattr(policy, "to_dict") else policy,
+        "bundle_id": b_id,
+        "bundle": b_json,
+    }
+
+
+# ── Portal Authentication Routes ──
+
+@app.post("/api/auth/login")
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    role = (data.get("role") or "").lower().strip()
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+
+    if role == "hospital":
+        if username in ("hospital", "hospital_admin", "admin", "apollo") or not password or password == "hospital123":
+            return jsonify({
+                "success": True,
+                "user": {
+                    "role": "hospital",
+                    "username": username or "hospital_admin",
+                    "display_name": "Dr. R. Sharma",
+                    "role_title": "Hospital Administrator & Clinician",
+                    "facility": "Apollo Specialty Hospitals, AP",
+                    "portal_label": "Hospital Information System (HIS)",
+                }
+            })
+        return _error("Invalid hospital credentials. Use demo: hospital_admin / hospital123", 401)
+
+    elif role == "insurance":
+        if username in ("insurance", "insurance_auditor", "auditor", "tpa", "star") or not password or password == "insurance123":
+            return jsonify({
+                "success": True,
+                "user": {
+                    "role": "insurance",
+                    "username": username or "insurance_auditor",
+                    "display_name": "K. V. Raman",
+                    "role_title": "Senior Claims Officer & TPA Auditor",
+                    "facility": "Health Insurance Claims Authority (TPA)",
+                    "portal_label": "Health Insurance Claims Authority",
+                }
+            })
+        return _error("Invalid insurance credentials. Use demo: insurance_auditor / insurance123", 401)
+
+    return _error("Invalid portal selection. Specify role 'hospital' or 'insurance'.", 400)
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    return jsonify({"success": True, "message": "Logged out successfully."})
+
+
+# ── Insurance Policy Upload & Adjudication Routes ──
+
+@app.get("/api/insurance/sample-policies")
+def insurance_sample_policies():
+    """Lists available pre-loaded insurance policy documents with patient association hints."""
+    policies_dir = _DEMO_DIR / "sample" / "insurance policies"
+    if not policies_dir.exists():
+        return jsonify([])
+
+    PATIENT_HINTS = {
+        "AP12363098": "Koppula Venkata Ramudu (Bill: ₹42,962 • 80:20 Co-Pay)",
+        "AP12361877": "Ballari Ganganna (Bill: ₹38,500 • Co-Pay)",
+        "AP12362013": "MRS. RUKSANA (Surgical Oncology • Cashless)",
+        "AP12362282": "Kanala Parvathamma (In-Patient Treatment • Co-Pay)",
+        "AP12362881": "Poosuloori Maharaju (Biopsy & Oncology • Cashless)",
+    }
+
+    result = []
+    for p in sorted(policies_dir.glob("*.pdf")):
+        hint = ""
+        for k, v in PATIENT_HINTS.items():
+            if k in p.name:
+                hint = v
+                break
+        result.append({
+            "filename": p.name,
+            "patient_hint": hint or "Sample Insurance Policy Document",
+            "size_kb": round(p.stat().st_size / 1024, 1),
+        })
+    return jsonify(result)
+
+
+@app.post("/api/insurance/patients/<patient_id>/adjudicate-policy")
+def insurance_adjudicate_uploaded_policy(patient_id: str):
+    """Processes uploaded insurance policy document for patient, recalculates coverage and generates settlement."""
+    patient = fhir_store.get_patient(patient_id)
+    if not patient:
+        return _error("Patient not found.", 404)
+
+    if "file" not in request.files:
+        return _error("No policy document file provided in request.", 400)
+    uploaded = request.files["file"]
+    if not uploaded or not uploaded.filename:
+        return _error("Empty policy document file.", 400)
+
+    file_bytes = uploaded.read()
+    if not file_bytes:
+        return _error("Uploaded policy document is empty.", 400)
+
+    mime_type = uploaded.mimetype or _infer_mime_type(uploaded.filename)
+    from demo.gemini_ocr import extract_insurance_policy_from_doc
+    policy = extract_insurance_policy_from_doc(file_bytes, mime_type, uploaded.filename)
+    if not policy:
+        return _error("Could not extract insurance policy details from document. Ensure it is a valid policy PDF or image.", 422)
+
+    try:
+        adj_result = _adjudicate_patient_with_policy(patient_id, policy)
+        return jsonify({
+            "success": True,
+            "patient_id": patient_id,
+            "patient_name": patient.get("name"),
+            "adjudication": adj_result["adjudication"],
+            "insurance_policy": adj_result["policy"],
+            "bundle_id": adj_result["bundle_id"],
+            "message": f"Successfully adjudicated claim for {patient.get('name')}. Approved: INR {adj_result['adjudication']['insured_amount']:,.2f} ({adj_result['adjudication']['coverage_percentage']}%).",
+        })
+    except Exception as exc:
+        log.exception("Adjudication failed for patient %s: %s", patient_id, exc)
+        return _error(f"Adjudication failed: {exc}", 500)
+
+
+@app.post("/api/insurance/patients/<patient_id>/adjudicate-sample-policy")
+def insurance_adjudicate_sample_policy(patient_id: str):
+    """Adjudicates patient claim using a pre-loaded sample policy file for quick 1-click verification."""
+    patient = fhir_store.get_patient(patient_id)
+    if not patient:
+        return _error("Patient not found.", 404)
+
+    data = request.get_json(silent=True) or {}
+    filename = data.get("policy_filename", "")
+    if not filename:
+        return _error("No policy_filename provided.", 400)
+
+    policy_path = _DEMO_DIR / "sample" / "insurance policies" / filename
+    if not policy_path.exists() or not policy_path.is_file():
+        return _error(f"Sample policy file '{filename}' not found.", 404)
+
+    file_bytes = policy_path.read_bytes()
+    from demo.gemini_ocr import extract_insurance_policy_from_doc
+    policy = extract_insurance_policy_from_doc(file_bytes, "application/pdf", filename)
+    if not policy:
+        return _error("Failed to extract policy details from sample document.", 500)
+
+    try:
+        adj_result = _adjudicate_patient_with_policy(patient_id, policy)
+        return jsonify({
+            "success": True,
+            "patient_id": patient_id,
+            "patient_name": patient.get("name"),
+            "adjudication": adj_result["adjudication"],
+            "insurance_policy": adj_result["policy"],
+            "bundle_id": adj_result["bundle_id"],
+            "message": f"Successfully adjudicated claim for {patient.get('name')} using {filename}.",
+        })
+    except Exception as exc:
+        log.exception("Sample adjudication failed for patient %s: %s", patient_id, exc)
+        return _error(f"Adjudication failed: {exc}", 500)
+
+
+@app.post("/api/insurance/patients/<patient_id>/reset-adjudication")
+def insurance_reset_adjudication(patient_id: str):
+    """Strips Coverage and ClaimResponse to allow re-testing policy upload flow."""
+    bundles = fhir_store.get_bundles_for_patient(patient_id)
+    if not bundles:
+        return _error("Patient not found.", 404)
+    target = bundles[0]
+    b_json = json.loads(target["bundle_json"]) if isinstance(target.get("bundle_json"), str) else target.get("bundle_json", {})
+    b_json["entry"] = [
+        e for e in b_json.get("entry", [])
+        if e.get("resource", {}).get("resourceType") not in ("Coverage", "ClaimResponse")
+    ]
+    comp = next((e.get("resource") for e in b_json.get("entry", []) if e.get("resource", {}).get("resourceType") == "Composition"), None)
+    if comp:
+        comp_secs = comp.setdefault("section", [])
+        comp_secs[:] = [s for s in comp_secs if not any(k in s.get("title", "") for k in ("Insurance Coverage", "Adjudication"))]
+    fhir_store.update_bundle_json(target["id"], json.dumps(b_json))
+    return jsonify({"success": True, "message": "Adjudication reset. Patient is now awaiting policy upload."})
 
 
 @app.delete("/api/patients/<patient_id>")
@@ -749,7 +917,7 @@ def insurance_convert():
 
 @app.get("/api/insurance/patients")
 def insurance_list_patients():
-    return jsonify(insurance_store.get_all_patients())
+    return jsonify(_get_enriched_patients_list())
 
 
 @app.get("/api/insurance/patients/<patient_id>")
