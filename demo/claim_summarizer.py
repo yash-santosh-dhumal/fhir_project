@@ -198,12 +198,26 @@ def _populate_from_gemini(summary: ClaimSummary, extraction: Any) -> None:
 
 def _clean_amount(amt_str: str) -> str:
     """Format amount string cleanly with Rupee symbol if numeric."""
-    s = amt_str.strip()
-    if not s:
+    if not amt_str:
         return ""
-    if re.match(r'^[₹Rs|INR]', s, re.IGNORECASE):
-        return s
-    return f"₹{s}"
+    s = str(amt_str).strip()
+    if not re.search(r'\d', s):
+        return ""
+    # Strip any leading stray currency, commas, colons
+    s_core = re.sub(r'^[₹Rs.INR\s,:-]+', '', s, flags=re.I)
+    m = re.search(r'(\d[\d,]*(?:\.\d{1,2})?)', s_core)
+    if not m:
+        return ""
+    num_str = m.group(1).rstrip(',')
+    try:
+        clean_num = float(num_str.replace(',', ''))
+        if clean_num <= 0:
+            return ""
+        if clean_num % 1 != 0:
+            return f"₹{clean_num:,.2f}"
+        return f"₹{int(clean_num):,}"
+    except (ValueError, TypeError):
+        return f"₹{num_str}"
 
 
 def _extract_financials_into_keyfields(kf: ClaimKeyFields, text: str) -> None:
@@ -213,40 +227,50 @@ def _extract_financials_into_keyfields(kf: ClaimKeyFields, text: str) -> None:
         return
     s_lower = s.lower()
 
-    # Gross bill amount
+    # Gross bill amount - requires at least one digit
     if any(k in s_lower for k in ("gross", "hospital bill", "total bill", "bill amount")):
-        m = (re.search(r'([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*gross', s, re.I) or
-             re.search(r'(?:gross|hospital bill|total bill)[^0-9\u20b9]*([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)', s, re.I))
+        m = (re.search(r'([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*gross', s, re.I) or
+             re.search(r'(?:gross|hospital bill|total bill)[^\d\u20b9]*([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)', s, re.I))
         if m and not kf.gross_bill_amount:
-            kf.gross_bill_amount = _clean_amount(m.group(1))
+            amt = _clean_amount(m.group(1))
+            if amt:
+                kf.gross_bill_amount = amt
 
-    # Net claimed amount
+    # Net claimed amount - requires at least one digit
     if any(k in s_lower for k in ("net claimed", "claimed amount", "net amount", "net bill")):
-        m = (re.search(r'([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*net', s, re.I) or
-             re.search(r'(?:net claimed|claimed amount|net amount)[^0-9\u20b9]*([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)', s, re.I))
+        m = (re.search(r'([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*net', s, re.I) or
+             re.search(r'(?:net claimed|claimed amount|net amount)[^\d\u20b9]*([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)', s, re.I))
         if m and not kf.net_claimed_amount:
-            kf.net_claimed_amount = _clean_amount(m.group(1))
+            amt = _clean_amount(m.group(1))
+            if amt:
+                kf.net_claimed_amount = amt
 
-    # Pre-authorized amount
+    # Pre-authorized amount - requires at least one digit
     if any(k in s_lower for k in ("pre-auth", "preauth", "pre auth")):
-        m = (re.search(r'([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*pre-?auth', s, re.I) or
-             re.search(r'pre-?auth[^0-9\u20b9]*([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)', s, re.I))
+        m = (re.search(r'([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*pre-?auth', s, re.I) or
+             re.search(r'pre-?auth[^\d\u20b9]*([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)', s, re.I))
         if m and not kf.pre_authorized_amount:
-            kf.pre_authorized_amount = _clean_amount(m.group(1))
+            amt = _clean_amount(m.group(1))
+            if amt:
+                kf.pre_authorized_amount = amt
 
-    # Approved / Sanctioned amount
+    # Approved / Sanctioned amount - requires at least one digit
     if any(k in s_lower for k in ("approved", "sanctioned", "settled")):
-        m = (re.search(r'([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*(?:approved|sanctioned|settled)', s, re.I) or
-             re.search(r'(?:approved|sanctioned|settled)[^0-9\u20b9]*([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?)', s, re.I))
+        m = (re.search(r'([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*(?:approved|sanctioned|settled)', s, re.I) or
+             re.search(r'(?:approved|sanctioned|settled)[^\d\u20b9]*([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)', s, re.I))
         if m and not kf.approved_amount:
-            kf.approved_amount = _clean_amount(m.group(1))
+            amt = _clean_amount(m.group(1))
+            if amt:
+                kf.approved_amount = amt
 
-    # Sum insured
+    # Sum insured - requires at least one digit
     if any(k in s_lower for k in ("sum insured", "sum-insured", "cover amount", "policy amount", "sum assured")):
-        m = (re.search(r'([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?[A-Za-z]*)\s*sum\s*insured', s, re.I) or
-             re.search(r'sum\s*insured[^0-9\u20b9]*([\u20b9Rs.INR\s]*[0-9,]+(?:\.\d{2})?[A-Za-z]*)', s, re.I))
+        m = (re.search(r'([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?[A-Za-z]*)\s*sum\s*insured', s, re.I) or
+             re.search(r'sum\s*insured[^\d\u20b9]*([\u20b9Rs.INR\s]*\d[\d,]*(?:\.\d{2})?[A-Za-z]*)', s, re.I))
         if m and not kf.sum_insured:
-            kf.sum_insured = _clean_amount(m.group(1))
+            amt = _clean_amount(m.group(1))
+            if amt:
+                kf.sum_insured = amt
 
     # Clinical fields & dates
     if not kf.primary_diagnosis and any(k in s_lower for k in ("diagnosis", "diagnosed", "condition")):
@@ -259,8 +283,22 @@ def _extract_financials_into_keyfields(kf: ClaimKeyFields, text: str) -> None:
         date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', s)
         if date_match:
             kf.discharge_date = date_match.group(0)
-    if not kf.room_category and any(k in s_lower for k in ("room", "ward", "bed")):
-        kf.room_category = s
+
+    # Room category: exclude medication phrases, prescriptions, and postal addresses
+    if not kf.room_category:
+        bad_room_words = ("prescrib", "tab", "tablet", "capsule", "mg", "syrup", "daily", "imatinib", "dose", "chemo", "village", "mandal", "district", "pin", "ward-", "street", "road")
+        if not any(w in s_lower for w in bad_room_words):
+            if re.search(r'\b(?:general ward|private room|semi-private|icu|deluxe|twin sharing|daycare|day care|single room|executive room)\b', s_lower):
+                m_room = re.search(r'\b(?:general ward|private room|semi-private(?: ward)?|icu|deluxe(?: room)?|twin sharing|daycare|day care|single(?: private)? room|executive room)\b', s, re.I)
+                if m_room:
+                    kf.room_category = m_room.group(0).title()
+            elif re.search(r'\b(?:room category|accommodation|bed type)\s*[:\-]\s*([a-zA-Z0-9\s\/-]+)', s, re.I):
+                m_room = re.search(r'\b(?:room category|accommodation|bed type)\s*[:\-]\s*([a-zA-Z0-9\s\/-]+)', s, re.I)
+                if m_room:
+                    cand = m_room.group(1).split(',')[0].split(';')[0].strip()
+                    if not any(w in cand.lower() for w in bad_room_words) and len(cand) < 40:
+                        kf.room_category = cand
+
     if not kf.claim_type and any(k in s_lower for k in ("cashless", "reimbursement")):
         kf.claim_type = "Cashless" if "cashless" in s_lower else "Reimbursement"
     if not kf.length_of_stay and any(k in s_lower for k in ("length of stay", "days of stay", "duration")):
@@ -352,6 +390,50 @@ def _populate_from_bundle(summary: ClaimSummary, bundle: dict[str, Any]) -> None
                 # Scan all items for financial and clinical data
                 for it in cleaned_items:
                     _extract_financials_into_keyfields(kf, it)
+
+        elif rtype == "Claim":
+            tot = r.get("total", {})
+            val = tot.get("value")
+            if val is not None:
+                amt = _clean_amount(str(val))
+                if amt and not kf.gross_bill_amount:
+                    kf.gross_bill_amount = amt
+                if amt and not kf.total_claimed_amount:
+                    kf.total_claimed_amount = amt
+
+            if not kf.room_category:
+                for item in r.get("item", []) or []:
+                    cat_text = str(item.get("category", {}).get("text", "")).lower()
+                    prod_text = str(item.get("productOrService", {}).get("text", ""))
+                    prod_lower = prod_text.lower()
+                    if ("room" in cat_text or "board" in cat_text or "accommodation" in cat_text) or any(w in prod_lower for w in ("ward", "room", "bed", "icu")):
+                        clean_room = re.sub(r'\s*(?:charges|tariff|rent|fee|bill).*$', '', prod_text, flags=re.I).strip()
+                        if clean_room and not any(w in clean_room.lower() for w in ("prescrib", "tab", "mg", "ward-")):
+                            kf.room_category = clean_room
+                            break
+
+        elif rtype == "ClaimResponse":
+            for tot in r.get("total", []) or []:
+                codes = [c.get("code") for c in tot.get("category", {}).get("coding", [])]
+                amt_val = tot.get("amount", {}).get("value")
+                if amt_val is not None:
+                    amt = _clean_amount(str(amt_val))
+                    if amt:
+                        if "submitted" in codes and not kf.gross_bill_amount:
+                            kf.gross_bill_amount = amt
+                        elif "benefit" in codes and not kf.approved_amount:
+                            kf.approved_amount = amt
+            if not kf.approved_amount and r.get("payment", {}).get("amount", {}).get("value"):
+                kf.approved_amount = _clean_amount(str(r["payment"]["amount"]["value"]))
+            if r.get("preAuthRef") and not kf.claim_number:
+                kf.claim_number = str(r["preAuthRef"])
+
+        elif rtype == "Coverage":
+            for cls in r.get("class", []) or []:
+                c_type = cls.get("type", {}).get("coding", [{}])[0].get("code", "")
+                c_val = str(cls.get("value") or "")
+                if c_type in ("sum_insured", "subplan") and c_val and not kf.sum_insured:
+                    kf.sum_insured = _clean_amount(c_val)
 
 
 def _populate_from_archive_info(summary: ClaimSummary, info: dict[str, Any]) -> None:

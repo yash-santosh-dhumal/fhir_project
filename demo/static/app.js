@@ -1254,6 +1254,16 @@ function renderClaimSummary(claimSummary) {
 
 function _claimField(label, value, highlight = false) {
   if (!value) return "";
+  const s = String(value).trim();
+  const lowerLabel = label.toLowerCase();
+  if (lowerLabel.includes("amount") || lowerLabel.includes("bill") || lowerLabel.includes("sum insured")) {
+    if (!/\d/.test(s)) return "";
+  }
+  if (lowerLabel.includes("room category")) {
+    if (["prescrib", "tab", "mg", "ward-", "mandal", "district", "imatinib"].some(w => s.toLowerCase().includes(w))) {
+      return "";
+    }
+  }
   const cls = highlight ? ' claim-field-highlight' : '';
   return `
     <div class="claim-field${cls}">
@@ -3588,7 +3598,82 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
     }
   }
 
-  // Extract financial amounts if not already in kf
+  // Helpers for amount validation and formatting
+  const _isValidAmount = (val) => {
+    if (!val) return false;
+    const s = String(val).trim();
+    return /\d/.test(s);
+  };
+
+  const _formatAmount = (val) => {
+    if (!_isValidAmount(val)) return "";
+    const s = String(val).trim();
+    const cleanNum = parseFloat(s.replace(/[^0-9.]/g, ""));
+    if (!isNaN(cleanNum) && cleanNum > 0) {
+      if (cleanNum % 1 !== 0) {
+        return `₹${cleanNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+      return `₹${cleanNum.toLocaleString("en-IN")}`;
+    }
+    return s.startsWith("₹") ? s : `₹${s}`;
+  };
+
+  // Inspect authoritative FHIR resources in the bundle
+  const bundleClaims = (resources || []).filter(r => r.resourceType === "Claim");
+  const bundleClaimResponse = (resources || []).find(r => r.resourceType === "ClaimResponse");
+  const bundleCoverage = (resources || []).find(r => r.resourceType === "Coverage");
+
+  // Validate or clear any existing amounts in kf that lack digits (e.g. "₹,")
+  if (!_isValidAmount(kf.total_claimed_amount)) kf.total_claimed_amount = "";
+  if (!_isValidAmount(kf.gross_bill_amount)) kf.gross_bill_amount = "";
+  if (!_isValidAmount(kf.net_claimed_amount)) kf.net_claimed_amount = "";
+  if (!_isValidAmount(kf.pre_authorized_amount)) kf.pre_authorized_amount = "";
+  if (!_isValidAmount(kf.approved_amount)) kf.approved_amount = "";
+  if (!_isValidAmount(kf.sum_insured)) kf.sum_insured = "";
+
+  // Pull amounts from Claim if missing or empty
+  if (!kf.gross_bill_amount || !kf.total_claimed_amount) {
+    if (bundleClaims.length > 0) {
+      let totalBilled = 0;
+      bundleClaims.forEach(c => {
+        totalBilled += Number(c.total?.value || 0);
+      });
+      if (totalBilled > 0) {
+        if (!kf.gross_bill_amount) kf.gross_bill_amount = _formatAmount(totalBilled);
+        if (!kf.total_claimed_amount) kf.total_claimed_amount = _formatAmount(totalBilled);
+      }
+    }
+  }
+
+  // Pull amounts from ClaimResponse if missing
+  if (bundleClaimResponse) {
+    (bundleClaimResponse.total || []).forEach(tot => {
+      const codes = (tot.category?.coding || []).map(c => c.code);
+      const val = Number(tot.amount?.value || 0);
+      if (val > 0) {
+        if (codes.includes("submitted") && !kf.gross_bill_amount) kf.gross_bill_amount = _formatAmount(val);
+        if (codes.includes("submitted") && !kf.total_claimed_amount) kf.total_claimed_amount = _formatAmount(val);
+        if (codes.includes("benefit") && !kf.approved_amount) kf.approved_amount = _formatAmount(val);
+      }
+    });
+    if (!kf.approved_amount && bundleClaimResponse.payment?.amount?.value) {
+      const pVal = Number(bundleClaimResponse.payment.amount.value);
+      if (pVal > 0) kf.approved_amount = _formatAmount(pVal);
+    }
+  }
+
+  // Pull sum insured from Coverage if missing
+  if (!kf.sum_insured && bundleCoverage) {
+    const sumInsClass = (bundleCoverage.class || []).find(c => {
+      const code = c.type?.coding?.[0]?.code;
+      return code === "sum_insured" || code === "subplan";
+    });
+    if (sumInsClass?.value && _isValidAmount(sumInsClass.value)) {
+      kf.sum_insured = _formatAmount(sumInsClass.value);
+    }
+  }
+
+  // Fallback to text regex only with strict digit requirement
   if (!kf.total_claimed_amount || !kf.gross_bill_amount || !kf.approved_amount) {
     const allTexts = [];
     docSections.forEach(s => {
@@ -3599,28 +3684,52 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
       const s = String(t).trim();
       const sLower = s.toLowerCase();
       if (!kf.gross_bill_amount && (sLower.includes("gross") || sLower.includes("hospital bill"))) {
-        const m = s.match(/([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*gross/i) || s.match(/gross[^0-9₹]*([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)/i);
-        if (m) kf.gross_bill_amount = m[1].trim();
+        const m = s.match(/([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*gross/i) || s.match(/gross[^\d₹]*([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)/i);
+        if (m && _isValidAmount(m[1])) kf.gross_bill_amount = _formatAmount(m[1]);
       }
       if (!kf.net_claimed_amount && (sLower.includes("net") || sLower.includes("claimed amount"))) {
-        const m = s.match(/([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)\s*net/i) || s.match(/net[^0-9₹]*([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)/i);
-        if (m) kf.net_claimed_amount = m[1].trim();
+        const m = s.match(/([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)\s*net/i) || s.match(/net[^\d₹]*([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)/i);
+        if (m && _isValidAmount(m[1])) kf.net_claimed_amount = _formatAmount(m[1]);
       }
       if (!kf.pre_authorized_amount && (sLower.includes("pre-auth") || sLower.includes("preauth"))) {
-        const m = s.match(/pre-?auth[^0-9₹]*([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)/i);
-        if (m) kf.pre_authorized_amount = m[1].trim();
+        const m = s.match(/pre-?auth[^\d₹]*([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)/i);
+        if (m && _isValidAmount(m[1])) kf.pre_authorized_amount = _formatAmount(m[1]);
       }
       if (!kf.approved_amount && (sLower.includes("approved") || sLower.includes("sanctioned"))) {
-        const m = s.match(/(?:approved|sanctioned)[^0-9₹]*([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?)/i);
-        if (m) kf.approved_amount = m[1].trim();
+        const m = s.match(/(?:approved|sanctioned)[^\d₹]*([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?)/i);
+        if (m && _isValidAmount(m[1])) kf.approved_amount = _formatAmount(m[1]);
       }
       if (!kf.sum_insured && (sLower.includes("sum insured") || sLower.includes("sum assured"))) {
-        const m = s.match(/sum\s*(?:insured|assured)[^0-9₹]*([₹Rs.INR\s]*[0-9,]+(?:\.\d{2})?[A-Za-z]*)/i);
-        if (m) kf.sum_insured = m[1].trim();
+        const m = s.match(/sum\s*(?:insured|assured)[^\d₹]*([₹Rs.INR\s]*\d[\d,]*(?:\.\d{2})?[A-Za-z]*)/i);
+        if (m && _isValidAmount(m[1])) kf.sum_insured = _formatAmount(m[1]);
       }
     }
-    if (kf.net_claimed_amount) kf.total_claimed_amount = kf.net_claimed_amount;
-    else if (kf.gross_bill_amount) kf.total_claimed_amount = kf.gross_bill_amount;
+    if (kf.net_claimed_amount && !kf.total_claimed_amount) kf.total_claimed_amount = kf.net_claimed_amount;
+    else if (kf.gross_bill_amount && !kf.total_claimed_amount) kf.total_claimed_amount = kf.gross_bill_amount;
+  }
+
+  // Room category validation - prevent prescriptions or addresses from displaying
+  let roomCategory = kf.room_category || "";
+  const badRoomWords = ["prescrib", "tab", "tablet", "capsule", "mg", "syrup", "daily", "imatinib", "dose", "chemo", "village", "mandal", "district", "pin", "ward-", "street", "road"];
+  if (badRoomWords.some(w => roomCategory.toLowerCase().includes(w))) {
+    roomCategory = "";
+  }
+  if (!roomCategory && bundleClaims.length > 0) {
+    for (const c of bundleClaims) {
+      for (const item of (c.item || [])) {
+        const catText = (item.category?.text || "").toLowerCase();
+        const prodText = item.productOrService?.text || "";
+        const prodLower = prodText.toLowerCase();
+        if (catText.includes("room") || catText.includes("board") || catText.includes("accommodation") || /ward|room|bed|icu/.test(prodLower)) {
+          const clean = prodText.replace(/\s*(?:charges|tariff|rent|fee|bill).*$/i, "").trim();
+          if (clean && !badRoomWords.some(w => clean.toLowerCase().includes(w))) {
+            roomCategory = clean;
+            break;
+          }
+        }
+      }
+      if (roomCategory) break;
+    }
   }
 
   // Build flags HTML
@@ -3629,41 +3738,50 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
     flagsHtml = `<div class="claim-flags" style="margin-bottom:12px">${flags.map(f => `<span class="claim-flag">${escapeHtml(f)}</span>`).join("")}</div>`;
   }
 
-  // Build financial highlight metrics
-  const hasFinancials = kf.total_claimed_amount || kf.gross_bill_amount || kf.net_claimed_amount || kf.approved_amount || kf.pre_authorized_amount || kf.sum_insured;
+  // Build financial highlight metrics - strictly require valid numeric amounts
+  const hasValidClaimed = _isValidAmount(kf.total_claimed_amount);
+  const hasValidGross = _isValidAmount(kf.gross_bill_amount);
+  const hasValidNet = _isValidAmount(kf.net_claimed_amount) && kf.net_claimed_amount !== kf.total_claimed_amount;
+  const hasValidPreAuth = _isValidAmount(kf.pre_authorized_amount);
+  const hasValidApproved = _isValidAmount(kf.approved_amount);
+  const hasValidSumInsured = _isValidAmount(kf.sum_insured);
+  const hasClaimType = Boolean(kf.claim_type);
+
+  const hasFinancials = hasValidClaimed || hasValidGross || hasValidNet || hasValidPreAuth || hasValidApproved || hasValidSumInsured || hasClaimType;
+
   const financialMetricsHtml = hasFinancials ? `
     <div class="claim-financial-highlight-bar">
-      ${kf.total_claimed_amount ? `
+      ${hasValidClaimed ? `
         <div class="claim-metric-badge primary">
           <span class="metric-lbl">Total Claimed</span>
-          <span class="metric-val">${escapeHtml(kf.total_claimed_amount)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.total_claimed_amount))}</span>
         </div>` : ""}
-      ${kf.net_claimed_amount && kf.net_claimed_amount !== kf.total_claimed_amount ? `
+      ${hasValidNet ? `
         <div class="claim-metric-badge">
           <span class="metric-lbl">Net Claimed</span>
-          <span class="metric-val">${escapeHtml(kf.net_claimed_amount)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.net_claimed_amount))}</span>
         </div>` : ""}
-      ${kf.gross_bill_amount ? `
+      ${hasValidGross ? `
         <div class="claim-metric-badge">
           <span class="metric-lbl">Gross Hospital Bill</span>
-          <span class="metric-val">${escapeHtml(kf.gross_bill_amount)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.gross_bill_amount))}</span>
         </div>` : ""}
-      ${kf.pre_authorized_amount ? `
+      ${hasValidPreAuth ? `
         <div class="claim-metric-badge">
           <span class="metric-lbl">Pre-Authorized</span>
-          <span class="metric-val">${escapeHtml(kf.pre_authorized_amount)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.pre_authorized_amount))}</span>
         </div>` : ""}
-      ${kf.approved_amount ? `
+      ${hasValidApproved ? `
         <div class="claim-metric-badge success">
           <span class="metric-lbl">Approved / Sanctioned</span>
-          <span class="metric-val">${escapeHtml(kf.approved_amount)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.approved_amount))}</span>
         </div>` : ""}
-      ${kf.sum_insured ? `
+      ${hasValidSumInsured ? `
         <div class="claim-metric-badge info">
           <span class="metric-lbl">Sum Insured</span>
-          <span class="metric-val">${escapeHtml(kf.sum_insured)}</span>
+          <span class="metric-val">${escapeHtml(_formatAmount(kf.sum_insured))}</span>
         </div>` : ""}
-      ${kf.claim_type ? `
+      ${hasClaimType ? `
         <div class="claim-metric-badge">
           <span class="metric-lbl">Claim Type</span>
           <span class="metric-val">${escapeHtml(kf.claim_type)}</span>
@@ -3728,10 +3846,10 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
               <span class="dossier-label">Discharge Date</span>
               <span class="dossier-val mono">${escapeHtml(kf.discharge_date)}</span>
             </div>` : ""}
-            ${kf.room_category ? `
+            ${roomCategory ? `
             <div class="dossier-item">
               <span class="dossier-label">Room Category</span>
-              <span class="dossier-val">${escapeHtml(kf.room_category)}</span>
+              <span class="dossier-val">${escapeHtml(roomCategory)}</span>
             </div>` : ""}
           </div>
           ${financialMetricsHtml}
@@ -3748,45 +3866,7 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
           </div>` : ""}
         </div>
       </div>
-
-      <!-- Card 1b: Financial Summary -->
-      ${_renderFinancialCard(docSections, kf)}
-
-      ${docSections.length ? `
-      <!-- Card 2: Document Sections -->
-      <div class="report-dossier-card" style="grid-column: 1 / -1">
-        <div class="dossier-card-header">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-          <h4>Document Sections Summary (${docSections.length} sections)</h4>
-        </div>
-        <div class="dossier-content">
-          ${docSections.map((sec, idx) => {
-            const keyPts = (sec.key_data_points || []).filter(p => p && p.trim());
-            const keyPtsHtml = keyPts.length
-              ? `<ul class="claim-section-points" style="margin-top:6px">${keyPts.map(p => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`
-              : "";
-            return `
-              <div class="claim-doc-section ${idx === 0 ? 'expanded' : ''}" data-section-idx="${idx}">
-                <div class="claim-doc-section-header" onclick="this.parentElement.classList.toggle('expanded')">
-                  <span class="claim-doc-section-title">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="chevron-icon"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    ${escapeHtml(sec.title)}
-                  </span>
-                  <span class="claim-doc-section-badge">${escapeHtml(sec.title.split(' ')[0])}</span>
-                </div>
-                <div class="claim-doc-section-body">
-                  ${sec.summary ? `<p style="margin:0;color:var(--text-secondary);font-size:0.82rem;line-height:1.6">${escapeHtml(sec.summary)}</p>` : `<p style="margin:0;color:var(--text-muted);font-size:0.82rem">Section data available in full FHIR bundle.</p>`}
-                  ${keyPtsHtml}
-                </div>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>` : ""}
     </div>
-
-    <!-- Clinical Section (shared) -->
-    ${clinicalSectionHtml}
   `;
 }
 
