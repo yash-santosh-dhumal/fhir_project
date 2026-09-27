@@ -131,6 +131,9 @@ class ExtractedInsurancePolicy:
     pre_auth_approved_amount: float = 0.0     # Trust/Insurer Approved Amount
     patient_out_of_pocket: float = 0.0        # Patient Liability stated in document
     covered_categories: list[str] = field(default_factory=list)
+    excluded_categories: list[str] = field(default_factory=list)  # Treatments / drugs NOT covered
+    deductible_amount: float = 0.0            # Per-claim or per-hospitalization deductible (INR)
+    room_rent_sublimit: float = 0.0           # Room rent sub-limit per day (INR, 0 = no sub-limit)
     terms_and_rules: str = ""
     source_document: str = ""
 
@@ -821,7 +824,10 @@ Extract:
 9. pre_auth_approved_amount: Exact pre-approved / sanctioned amount in INR (if explicitly stated, else 0.0)
 10. patient_out_of_pocket: Patient payable amount in INR (if explicitly stated, else 0.0)
 11. covered_categories: List of treatments, procedures, and charges covered under the policy (e.g. ["In-Patient Hospitalization", "Medical & Surgical Oncology", "ICU", "Investigations", "Pharmacy", "Bed Charges", "General Ward"])
-12. terms_and_rules: Concise policy clause statement explaining the cost-sharing terms (e.g. "80% sanctioned by Trust/Insurer, 20% patient out-of-pocket co-payment liability")
+12. excluded_categories: List of treatments, procedures, drugs, or charges SPECIFICALLY EXCLUDED or NOT COVERED under this policy. Look for any exclusion clauses, policy addendums, or "not covered" statements (e.g. ["Oral Chemotherapy Drugs", "Dental Treatment", "Cosmetic Surgery"]). If no specific exclusions beyond standard waiting-period exclusions, return an empty list.
+13. deductible_amount: Per-claim or per-hospitalization deductible amount in INR that the insured must bear before the insurer pays (e.g. 5000.0). If NIL or not mentioned, return 0.0
+14. room_rent_sublimit: Room rent sub-limit per day in INR (e.g. 500.0 for General Ward, or the lowest sub-limit if multiple). If no room rent sub-limit or if room rent is "as per actuals", return 0.0
+15. terms_and_rules: Concise policy clause statement explaining the cost-sharing terms, deductible rules, exclusions, and room rent sub-limits (e.g. "80% sanctioned by Trust/Insurer, 20% patient out-of-pocket co-payment liability. INR 5000 deductible per claim. Oral chemotherapy drugs excluded.")
 
 OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
 {{
@@ -838,6 +844,9 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
     "pre_auth_approved_amount": 0.0,
     "patient_out_of_pocket": 0.0,
     "covered_categories": ["string"],
+    "excluded_categories": ["string"],
+    "deductible_amount": 0.0,
+    "room_rent_sublimit": 0.0,
     "terms_and_rules": "string"
   }}
 }}
@@ -892,6 +901,15 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
                 else:
                     categories_list = []
 
+                # Parse excluded categories
+                raw_excluded = ip.get("excluded_categories", [])
+                if isinstance(raw_excluded, str):
+                    excluded_list = [c.strip() for c in raw_excluded.split(",") if c.strip()]
+                elif isinstance(raw_excluded, list):
+                    excluded_list = [str(c).strip() for c in raw_excluded if str(c).strip()]
+                else:
+                    excluded_list = []
+
                 return ExtractedInsurancePolicy(
                     policy_number=str(ip.get("policy_number") or "").strip() or "POL-UNKNOWN",
                     scheme_or_insurer=str(ip.get("scheme_or_insurer") or "").strip() or "Insurance Policy",
@@ -905,6 +923,9 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
                     pre_auth_approved_amount=float(ip.get("pre_auth_approved_amount", 0) or 0),
                     patient_out_of_pocket=float(ip.get("patient_out_of_pocket", 0) or 0),
                     covered_categories=categories_list,
+                    excluded_categories=excluded_list,
+                    deductible_amount=float(ip.get("deductible_amount", 0) or 0),
+                    room_rent_sublimit=float(ip.get("room_rent_sublimit", 0) or 0),
                     terms_and_rules=terms_str,
                     source_document=filename,
                 )

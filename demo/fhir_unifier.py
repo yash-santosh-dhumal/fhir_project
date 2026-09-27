@@ -45,6 +45,243 @@ ABDM_CLAIM_RESPONSE_PROFILE = (
 )
 
 _LOINC_CACHE: dict[str, tuple[str, str]] | None = None
+_LOINC_DB_CONN: Any | None = None
+
+
+def _build_loinc_database_from_zip(zip_path: Path, db_path: Path) -> None:
+    """Builds a fast queryable SQLite LOINC database from Loinc_2.83.zip."""
+    import csv
+    import io
+    import sqlite3
+    import zipfile
+
+    log.info("Building LOINC 2.83 SQLite database from %s...", zip_path)
+    temp_db = db_path.with_suffix(".tmp")
+    if temp_db.exists():
+        try:
+            temp_db.unlink()
+        except OSError:
+            pass
+
+    conn = sqlite3.connect(str(temp_db))
+    c = conn.cursor()
+    c.execute("PRAGMA synchronous = OFF")
+    c.execute("PRAGMA journal_mode = MEMORY")
+    c.execute("""
+        CREATE TABLE loinc_terms (
+            term TEXT NOT NULL,
+            loinc_num TEXT NOT NULL,
+            long_common_name TEXT NOT NULL,
+            rank INTEGER DEFAULT 999999,
+            is_lab INTEGER DEFAULT 0
+        )
+    """)
+
+    with zipfile.ZipFile(zip_path) as z:
+        with z.open("LoincTable/Loinc.csv") as f:
+            reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+            ignore_terms = {
+                "level", "point in time", "qnt", "quan", "quant", "quantitative",
+                "screen", "pl", "plasma", "plsm", "ser", "serum", "bld", "blood",
+                "urn", "urine", "chemistry", "hematology", "cell counts", "pathology",
+            }
+            batch = []
+            seen = set()
+
+            def _add(t_str: str, num_str: str, name_str: str, r_val: int, lab_flag: int):
+                clean = t_str.strip().lower()
+                if not clean or len(clean) < 2 or clean in ignore_terms or len(clean) > 90:
+                    return
+                key = (clean, num_str)
+                if key in seen:
+                    return
+                seen.add(key)
+                batch.append((clean, num_str, name_str, r_val, lab_flag))
+
+            for row in reader:
+                if row.get("STATUS") != "ACTIVE":
+                    continue
+                num = (row.get("LOINC_NUM") or "").strip()
+                long_name = (row.get("LONG_COMMON_NAME") or "").strip()
+                comp = (row.get("COMPONENT") or "").strip()
+                short = (row.get("SHORTNAME") or "").strip()
+                disp = (row.get("DisplayName") or "").strip()
+                related = (row.get("RELATEDNAMES2") or "").strip()
+                rank_str = (row.get("COMMON_TEST_RANK") or "").strip()
+                rank = int(rank_str) if rank_str.isdigit() and int(rank_str) > 0 else 999999
+                is_lab = 1 if row.get("CLASSTYPE") == "1" else 0
+
+                if comp:
+                    _add(comp, num, long_name, rank, is_lab)
+                    if "." in comp:
+                        _add(comp.replace(".", " "), num, long_name, rank, is_lab)
+                if long_name:
+                    _add(long_name, num, long_name, rank, is_lab)
+                if short:
+                    _add(short, num, long_name, rank, is_lab)
+                if disp and "[" not in disp:
+                    _add(disp, num, long_name, rank, is_lab)
+                for s in related.split(";"):
+                    _add(s, num, long_name, rank, is_lab)
+
+    clinical_aliases = [
+        ("hemoglobin", "718-7", "Hemoglobin [Mass/volume] in Blood", 1, 1),
+        ("hb", "718-7", "Hemoglobin [Mass/volume] in Blood", 1, 1),
+        ("hgb", "718-7", "Hemoglobin [Mass/volume] in Blood", 1, 1),
+        ("haemoglobin", "718-7", "Hemoglobin [Mass/volume] in Blood", 1, 1),
+        ("total leukocyte count", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("total leucocyte count", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("tlc", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("white blood cells", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("wbc", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("platelet count", "777-3", "Platelets [#/volume] in Blood", 1, 1),
+        ("platelets", "777-3", "Platelets [#/volume] in Blood", 1, 1),
+        ("plt", "777-3", "Platelets [#/volume] in Blood", 1, 1),
+        ("red blood cells", "789-8", "Erythrocytes [#/volume] in Blood", 1, 1),
+        ("rbc", "789-8", "Erythrocytes [#/volume] in Blood", 1, 1),
+        ("erythrocytes", "789-8", "Erythrocytes [#/volume] in Blood", 1, 1),
+        ("packed cell volume", "4544-3", "Hematocrit [Volume Fraction] of Blood", 1, 1),
+        ("pcv", "4544-3", "Hematocrit [Volume Fraction] of Blood", 1, 1),
+        ("hematocrit", "4544-3", "Hematocrit [Volume Fraction] of Blood", 1, 1),
+        ("hct", "4544-3", "Hematocrit [Volume Fraction] of Blood", 1, 1),
+        ("creatinine", "2160-0", "Creatinine [Mass/volume] in Serum or Plasma", 1, 1),
+        ("serum creatinine", "2160-0", "Creatinine [Mass/volume] in Serum or Plasma", 1, 1),
+        ("blood urea", "3094-0", "Urea nitrogen [Mass/volume] in Serum or Plasma", 1, 1),
+        ("urea", "3094-0", "Urea nitrogen [Mass/volume] in Serum or Plasma", 1, 1),
+        ("bun", "3094-0", "Urea nitrogen [Mass/volume] in Serum or Plasma", 1, 1),
+        ("blood urea nitrogen", "3094-0", "Urea nitrogen [Mass/volume] in Serum or Plasma", 1, 1),
+        ("blood glucose", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("fasting blood sugar", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("fbs", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("random blood sugar", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("rbs", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("blood sugar", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("glucose", "1558-6", "Glucose [Mass/volume] in Serum or Plasma", 1, 1),
+        ("bilirubin total", "1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma", 1, 1),
+        ("total bilirubin", "1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma", 1, 1),
+        ("bilirubin direct", "1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma", 1, 1),
+        ("direct bilirubin", "1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma", 1, 1),
+        ("sgot", "1920-8", "Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma", 1, 1),
+        ("ast", "1920-8", "Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma", 1, 1),
+        ("sgpt", "1742-6", "Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma", 1, 1),
+        ("alt", "1742-6", "Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma", 1, 1),
+        ("hba1c", "4548-4", "Hemoglobin A1c/Hemoglobin.total in Blood", 1, 1),
+        ("glycated hemoglobin", "4548-4", "Hemoglobin A1c/Hemoglobin.total in Blood", 1, 1),
+        ("esr", "4537-7", "Erythrocyte sedimentation rate by Westergren method", 1, 1),
+        ("vitamin d", "62292-8", "25-hydroxyvitamin D3 [Mass/volume] in Serum or Plasma", 1, 1),
+        ("vitamin b12", "2132-9", "Cobalamin (Vitamin B12) [Mass/volume] in Serum or Plasma", 1, 1),
+        ("serum calcium", "17861-6", "Calcium [Mass/volume] in Serum or Plasma", 1, 1),
+        ("calcium", "17861-6", "Calcium [Mass/volume] in Serum or Plasma", 1, 1),
+        ("uric acid", "3084-1", "Uric acid [Mass/volume] in Serum or Plasma", 1, 1),
+        ("mcv", "787-2", "MCV [Entitic volume] by Automated count", 1, 1),
+        ("mch", "785-6", "MCH [Entitic mass] by Automated count", 1, 1),
+        ("mchc", "786-4", "MCHC [Mass/volume] by Automated count", 1, 1),
+        ("rdw", "788-0", "Erythrocyte distribution width [Ratio] by Automated count", 1, 1),
+        ("neutrophils", "770-8", "Neutrophils/100 leukocytes in Blood", 1, 1),
+        ("lymphocytes", "736-9", "Lymphocytes/100 leukocytes in Blood", 1, 1),
+        ("monocytes", "5905-5", "Monocytes/100 leukocytes in Blood", 1, 1),
+        ("eosinophils", "713-8", "Eosinophils/100 leukocytes in Blood", 1, 1),
+        ("basophils", "706-2", "Basophils/100 leukocytes in Blood", 1, 1),
+        ("absolute neutrophil count", "751-8", "Neutrophils [#/volume] in Blood", 1, 1),
+        ("anc", "751-8", "Neutrophils [#/volume] in Blood", 1, 1),
+        ("absolute lymphocyte count", "731-0", "Lymphocytes [#/volume] in Blood", 1, 1),
+        ("alc", "731-0", "Lymphocytes [#/volume] in Blood", 1, 1),
+        ("absolute monocyte count", "742-7", "Monocytes [#/volume] in Blood", 1, 1),
+        ("amc", "742-7", "Monocytes [#/volume] in Blood", 1, 1),
+        ("absolute eosinophil count", "711-2", "Eosinophils [#/volume] in Blood", 1, 1),
+        ("aec", "711-2", "Eosinophils [#/volume] in Blood", 1, 1),
+        ("absolute basophil count", "704-7", "Basophils [#/volume] in Blood", 1, 1),
+        ("abc", "704-7", "Basophils [#/volume] in Blood", 1, 1),
+        # Bone Marrow / Cytology / Pathology
+        ("site", "39111-0", "Body site", 1, 1),
+        ("biopsy site", "39111-0", "Body site", 1, 1),
+        ("cellularity", "74232-0", "Cellularity assessment in Bone marrow Narrative", 1, 1),
+        ("m:e ratio", "11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow", 1, 1),
+        ("me ratio", "11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow", 1, 1),
+        ("m/e ratio", "11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow", 1, 1),
+        ("myeloid/erythroid ratio", "11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow", 1, 1),
+        ("erythropoiesis", "74231-2", "Erythropoiesis assessment in Bone marrow Narrative", 1, 1),
+        ("myelopoiesis", "74228-8", "Myelopoiesis assessment in Bone marrow Narrative", 1, 1),
+        ("granulopoiesis", "74228-8", "Myelopoiesis assessment in Bone marrow Narrative", 1, 1),
+        ("blasts", "11150-0", "Blasts/cells in Bone marrow", 1, 1),
+        ("blast cells", "11150-0", "Blasts/cells in Bone marrow", 1, 1),
+        ("megakaryopoiesis", "74229-6", "Megakaryopoiesis assessment in Bone marrow Narrative", 1, 1),
+        ("megakaryocytes", "40688-4", "Megakaryocytes [Presence] in Bone marrow by Microscopy", 1, 1),
+        ("plasma cells", "74226-2", "Plasma cells assessment in Bone marrow Narrative", 1, 1),
+        ("re cells", "44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy", 1, 1),
+        ("reticuloendothelial cells", "44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy", 1, 1),
+        ("histiocytes", "44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy", 1, 1),
+        ("granulomas", "10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain", 1, 1),
+        ("haemoparasites", "53609-4", "Parasite identified in Bone marrow by Light microscopy", 1, 1),
+        ("hemoparasites", "53609-4", "Parasite identified in Bone marrow by Light microscopy", 1, 1),
+        ("no granulomas / haemoparasites", "10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain", 1, 1),
+        ("pearls stain", "101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain", 1, 1),
+        ("perls stain", "101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain", 1, 1),
+        ("prussian blue stain", "101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain", 1, 1),
+        ("iron stain", "101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain", 1, 1),
+        ("bone marrow aspiration study", "48807-2", "Bone marrow aspiration report", 1, 1),
+        ("bone marrow aspiration", "48807-2", "Bone marrow aspiration report", 1, 1),
+        ("bone marrow biopsy", "33721-2", "Bone marrow Pathology biopsy report", 1, 1),
+        ("large biopsy", "52121-1", "Biopsy [Interpretation] in Specimen Narrative", 1, 1),
+        ("biopsy report", "52121-1", "Biopsy [Interpretation] in Specimen Narrative", 1, 1),
+        ("impression", "8251-1", "Service comment", 1, 1),
+        ("lymphocytes/100 leukocytes in blood", "736-9", "Lymphocytes/100 leukocytes in Blood", 1, 1),
+        ("lymphocytes/100 leukocytes", "736-9", "Lymphocytes/100 leukocytes in Blood", 1, 1),
+        ("d. bilirubin", "1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma", 1, 1),
+        ("d bilirubin", "1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma", 1, 1),
+        ("t. bilirubin", "1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma", 1, 1),
+        ("t bilirubin", "1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma", 1, 1),
+        ("s. creatinine", "2160-0", "Creatinine [Mass/volume] in Serum or Plasma", 1, 1),
+        ("s creatinine", "2160-0", "Creatinine [Mass/volume] in Serum or Plasma", 1, 1),
+        ("hb", "718-7", "Hemoglobin [Mass/volume] in Blood", 1, 1),
+        ("tlc", "6690-2", "Leukocytes [#/volume] in Blood", 1, 1),
+        ("lymphocytes, plasma cells and re cells", "10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain", 1, 1),
+        ("granulomas / haemoparasites", "10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain", 1, 1),
+        ("granulomas / hemoparasites", "10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain", 1, 1),
+        ("hiv", "88453-6", "HIV 1 RNA+Hepatitis C virus RNA+Hepatitis B virus DNA [Presence] in Serum, Plasma or Blood from Donor by NAA with probe detection", 1, 1),
+        ("hbsag", "5195-3", "Hepatitis B virus surface Ag [Presence] in Serum", 1, 1),
+        ("hcv", "16128-1", "Hepatitis C virus Ab [Presence] in Serum", 1, 1),
+    ]
+    for item in clinical_aliases:
+        batch.append(item)
+
+    c.executemany(
+        "INSERT INTO loinc_terms (term, loinc_num, long_common_name, rank, is_lab) VALUES (?, ?, ?, ?, ?)",
+        batch
+    )
+    c.execute("CREATE INDEX idx_term ON loinc_terms(term)")
+    conn.commit()
+    conn.close()
+
+    temp_db.replace(db_path)
+    log.info("LOINC 2.83 SQLite database built successfully (%d terms).", len(batch))
+
+
+def _get_loinc_db_connection():
+    """Returns a connection to the LOINC 2.83 SQLite database."""
+    global _LOINC_DB_CONN
+    if _LOINC_DB_CONN is not None:
+        return _LOINC_DB_CONN
+
+    import sqlite3
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    db_path = data_dir / "loinc_283.db"
+    zip_path = data_dir / "Loinc_2.83.zip"
+
+    if not db_path.exists() and zip_path.exists():
+        try:
+            _build_loinc_database_from_zip(zip_path, db_path)
+        except Exception as exc:
+            log.warning("Could not build loinc_283.db from zip: %s", exc)
+
+    if db_path.exists():
+        try:
+            _LOINC_DB_CONN = sqlite3.connect(str(db_path), check_same_thread=False)
+            return _LOINC_DB_CONN
+        except Exception as exc:
+            log.warning("Could not open loinc_283.db: %s", exc)
+
+    return None
 
 
 def _get_loinc_mapping() -> dict[str, tuple[str, str]]:
@@ -57,7 +294,56 @@ def _get_loinc_mapping() -> dict[str, tuple[str, str]]:
         "blood group": ("883-9", "ABO and Rh group [Type] in Blood"),
         "rh factor": ("10331-7", "Rh [Type] in Blood"),
         "abo group": ("883-9", "ABO group [Type] in Blood"),
+        "site": ("39111-0", "Body site"),
+        "biopsy site": ("39111-0", "Body site"),
+        "cellularity": ("74232-0", "Cellularity assessment in Bone marrow Narrative"),
+        "m:e ratio": ("11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow"),
+        "me ratio": ("11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow"),
+        "m/e ratio": ("11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow"),
+        "myeloid/erythroid ratio": ("11138-5", "Myeloid cells/Erythroid cells [# Ratio] in Bone marrow"),
+        "erythropoiesis": ("74231-2", "Erythropoiesis assessment in Bone marrow Narrative"),
+        "myelopoiesis": ("74228-8", "Myelopoiesis assessment in Bone marrow Narrative"),
+        "granulopoiesis": ("74228-8", "Myelopoiesis assessment in Bone marrow Narrative"),
+        "blasts": ("11150-0", "Blasts/cells in Bone marrow"),
+        "blast cells": ("11150-0", "Blasts/cells in Bone marrow"),
+        "megakaryopoiesis": ("74229-6", "Megakaryopoiesis assessment in Bone marrow Narrative"),
+        "megakaryocytes": ("40688-4", "Megakaryocytes [Presence] in Bone marrow by Microscopy"),
+        "plasma cells": ("74226-2", "Plasma cells assessment in Bone marrow Narrative"),
+        "re cells": ("44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy"),
+        "reticuloendothelial cells": ("44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy"),
+        "histiocytes": ("44723-5", "Histiocytes [Presence] in Bone marrow by Light microscopy"),
+        "granulomas": ("10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain"),
+        "haemoparasites": ("53609-4", "Parasite identified in Bone marrow by Light microscopy"),
+        "hemoparasites": ("53609-4", "Parasite identified in Bone marrow by Light microscopy"),
+        "no granulomas / haemoparasites": ("10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain"),
+        "pearls stain": ("101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain"),
+        "perls stain": ("101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain"),
+        "prussian blue stain": ("101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain"),
+        "iron stain": ("101225-1", "Hemosiderin [Presence] in Blood or Marrow by Prussian blue stain"),
+        "bone marrow aspiration study": ("48807-2", "Bone marrow aspiration report"),
+        "bone marrow aspiration": ("48807-2", "Bone marrow aspiration report"),
+        "bone marrow biopsy": ("33721-2", "Bone marrow Pathology biopsy report"),
+        "large biopsy": ("52121-1", "Biopsy [Interpretation] in Specimen Narrative"),
+        "biopsy report": ("52121-1", "Biopsy [Interpretation] in Specimen Narrative"),
+        "impression": ("8251-1", "Service comment"),
+        "lymphocytes/100 leukocytes in blood": ("736-9", "Lymphocytes/100 leukocytes in Blood"),
+        "lymphocytes/100 leukocytes": ("736-9", "Lymphocytes/100 leukocytes in Blood"),
+        "d. bilirubin": ("1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma"),
+        "d bilirubin": ("1968-7", "Bilirubin.direct [Mass/volume] in Serum or Plasma"),
+        "t. bilirubin": ("1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma"),
+        "t bilirubin": ("1975-2", "Bilirubin.total [Mass/volume] in Serum or Plasma"),
+        "s. creatinine": ("2160-0", "Creatinine [Mass/volume] in Serum or Plasma"),
+        "s creatinine": ("2160-0", "Creatinine [Mass/volume] in Serum or Plasma"),
+        "hb": ("718-7", "Hemoglobin [Mass/volume] in Blood"),
+        "tlc": ("6690-2", "Leukocytes [#/volume] in Blood"),
+        "lymphocytes, plasma cells and re cells": ("10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain"),
+        "granulomas / haemoparasites": ("10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain"),
+        "granulomas / hemoparasites": ("10355-6", "Microscopic observation [Identifier] in Bone marrow by Wright Giemsa stain"),
+        "hiv": ("88453-6", "HIV 1 RNA+Hepatitis C virus RNA+Hepatitis B virus DNA [Presence] in Serum, Plasma or Blood from Donor by NAA with probe detection"),
+        "hbsag": ("5195-3", "Hepatitis B virus surface Ag [Presence] in Serum"),
+        "hcv": ("16128-1", "Hepatitis C virus Ab [Presence] in Serum"),
     }
+    mapping_ranks: dict[str, int] = {k: 1 for k in mapping}
 
     csv_path = Path(__file__).resolve().parent.parent / "data" / "analyte_records_top_2000.csv"
     if csv_path.exists():
@@ -70,14 +356,22 @@ def _get_loinc_mapping() -> dict[str, tuple[str, str]]:
                     code = (row.get("LOINC_NUM") or "").strip()
                     core = (row.get("core_analyte") or "").strip()
                     long_name = (row.get("LONG_COMMON_NAME") or "").strip()
+                    rank_str = (row.get("COMMON_TEST_RANK") or "").strip()
+                    rank_val = int(rank_str) if rank_str.isdigit() else 99999
                     if code and core:
-                        mapping[core.lower()] = (code, long_name)
+                        core_k = core.lower()
+                        if core_k not in mapping or rank_val < mapping_ranks.get(core_k, 99999):
+                            mapping[core_k] = (code, long_name)
+                            mapping_ranks[core_k] = rank_val
                     syns_str = row.get("synonyms")
                     if syns_str:
                         try:
                             syns = ast.literal_eval(syns_str)
                             for s in syns:
-                                mapping[str(s).strip().lower()] = (code, long_name)
+                                s_k = str(s).strip().lower()
+                                if s_k and (s_k not in mapping or rank_val < mapping_ranks.get(s_k, 99999)):
+                                    mapping[s_k] = (code, long_name)
+                                    mapping_ranks[s_k] = rank_val
                         except Exception:
                             pass
         except Exception as exc:
@@ -88,16 +382,55 @@ def _get_loinc_mapping() -> dict[str, tuple[str, str]]:
 
 
 def _lookup_loinc(test_name: str) -> tuple[str, str] | None:
-    """Finds best matching LOINC code and display name for a test analyte."""
+    """Finds best matching LOINC code and display name for a test analyte from LOINC 2.83."""
     if not test_name:
         return None
-    mapping = _get_loinc_mapping()
     t_lower = test_name.strip().lower()
-    if t_lower in mapping:
-        return mapping[t_lower]
+
+    # Generate search variations: exact, stripped of parentheses, inside parentheses, colon-normalized
+    variations = [t_lower]
+    t_colon_norm = re.sub(r"\s*([:/])\s*", r"\1", t_lower).strip()
+    if t_colon_norm and t_colon_norm not in variations:
+        variations.append(t_colon_norm)
+    t_clean = re.sub(r"\(.*?\)", "", t_lower).strip()
+    if t_clean and t_clean != t_lower and t_clean not in variations:
+        variations.append(t_clean)
+    inside_terms = re.findall(r"\((.*?)\)", t_lower)
+    for in_term in inside_terms:
+        in_t = in_term.strip()
+        if in_t and in_t not in variations:
+            variations.append(in_t)
+    t_norm = re.sub(r"[^a-z0-9\s]+", " ", t_lower).strip()
+    if t_norm and t_norm not in variations:
+        variations.append(t_norm)
+
+    # 1. Fast indexed search in LOINC 2.83 SQLite database
+    conn = _get_loinc_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            for v in variations:
+                row = cursor.execute(
+                    "SELECT loinc_num, long_common_name FROM loinc_terms WHERE term=? ORDER BY is_lab DESC, rank ASC LIMIT 1",
+                    (v,)
+                ).fetchone()
+                if row:
+                    return (row[0], row[1])
+        except Exception as exc:
+            log.debug("LOINC DB query error: %s", exc)
+
+    # 2. Fall back to cached mapping from analyte_records_top_2000.csv / default map
+    mapping = _get_loinc_mapping()
+    for v in variations:
+        if v in mapping:
+            return mapping[v]
+    candidates = []
     for k, v in mapping.items():
         if len(k) >= 4 and (k == t_lower or k in t_lower or t_lower in k):
-            return v
+            candidates.append((len(k), v))
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
     return None
 
 
@@ -607,15 +940,18 @@ def _adjudicate_bill_against_policy(
     ]
     target_bills = demo_bills if demo_bills else bills
 
+    all_bill_items: list[Any] = []
     total_billed = 0.0
     bill_items_by_category: dict[str, float] = {}
     for b in target_bills:
-        amt = float(getattr(b, "total_amount", 0.0) or 0.0)
-        if amt > 0:
-            total_billed += amt
         items = getattr(b, "items", []) or []
-        if not amt and items:
-            total_billed += sum(float(getattr(it, "amount", 0.0) or 0.0) for it in items)
+        all_bill_items.extend(items)
+        amt = float(getattr(b, "total_amount", 0.0) or 0.0)
+        items_sum = sum(float(getattr(it, "amount", 0.0) or 0.0) for it in items)
+        if items_sum > 0:
+            total_billed += items_sum
+        elif amt > 0:
+            total_billed += amt
         for it in items:
             cat = (getattr(it, "category", "") or "General").strip()
             item_amt = float(getattr(it, "amount", 0.0) or 0.0)
@@ -632,6 +968,25 @@ def _adjudicate_bill_against_policy(
     policy_num = getattr(policy, "policy_number", "") or "N/A"
     preauth_num = getattr(policy, "claim_or_preauth_number", "") or ""
     covered_categories = getattr(policy, "covered_categories", []) or []
+    excluded_categories = getattr(policy, "excluded_categories", []) or []
+    deductible_amount = float(getattr(policy, "deductible_amount", 0.0) or 0.0)
+    room_rent_sublimit = float(getattr(policy, "room_rent_sublimit", 0.0) or 0.0)
+
+    # Also try to extract deductible from terms text if not set via field
+    import re
+    if deductible_amount == 0.0 and terms_text:
+        ded_match = re.search(r'deductible[:\s]*(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)', terms_text)
+        if ded_match:
+            deductible_amount = float(ded_match.group(1).replace(',', ''))
+
+    # Detect ICU sub-limit from terms text if present
+    icu_sublimit = 0.0
+    if terms_text:
+        icu_match = re.search(r'icu[^\d]*(\d[\d,]+)', terms_text)
+        if icu_match:
+            icu_sublimit = float(icu_match.group(1).replace(',', ''))
+    if icu_sublimit == 0.0 and room_rent_sublimit > 0:
+        icu_sublimit = room_rent_sublimit * 4.0  # standard industry ratio (e.g. 500 ward -> 2000 ICU)
 
     # Normalize copay_liab: if it looks like a ratio/percentage (< 100) rather than
     # an actual rupee amount, treat it as 0 and rely on copay_pct instead
@@ -640,7 +995,6 @@ def _adjudicate_bill_against_policy(
 
     # Detect coverage percentage from policy terms
     # Check for explicit percentage-based coverage rules (e.g. 80:20, 70:30, 90:10)
-    import re
     coverage_split_pct = 0.0  # insurer's share percentage
     if copay_pct > 0:
         coverage_split_pct = 100.0 - copay_pct
@@ -660,24 +1014,82 @@ def _adjudicate_bill_against_policy(
 
     has_copay_rule = coverage_split_pct > 0 and copay_pct > 0
 
-    # Determine the eligible (covered) amount from the bill by matching categories
+    # ── Actionable Specific Exclusions: match targeted clinical exclusions from policy ──
+    GENERIC_EXCLUSION_WORDS = {
+        "general", "care", "treatment", "treatments", "charges", "hospitalization", 
+        "medical", "disease", "diseases", "condition", "conditions", "illness", 
+        "evaluation", "investigation", "investigations", "record", "admission", 
+        "necessary", "supplements", "substances", "states", "related", "stay", 
+        "standard", "code", "clause", "and", "the", "for", "with", "without", 
+        "any", "all", "per", "prescribed", "unproven", "convalescence", "debility",
+        "therapy", "therapies", "agents", "drugs", "cycle", "course", "person", "insured"
+    }
+
+    # Extract actionable specific clinical terms from exclusion clauses
+    specific_exclusion_targets: list[tuple[str, list[str]]] = []
+    for ec in excluded_categories:
+        ec_clean = ec.strip().lower()
+        parts = re.split(r'[,;:]|\band\b|\bor\b|\bincluding\b', ec_clean)
+        for part in parts:
+            p = part.strip()
+            meaningful_words = [w for w in re.split(r'[\s/&,()]+', p) if len(w) > 3 and w not in GENERIC_EXCLUSION_WORDS]
+            if meaningful_words:
+                target_phrase = " ".join(meaningful_words)
+                specific_exclusion_targets.append((target_phrase, meaningful_words))
+
+    excluded_amount = 0.0
+    if specific_exclusion_targets and all_bill_items:
+        for it in all_bill_items:
+            desc_lower = (getattr(it, "description", "") or "").lower()
+            amt = float(getattr(it, "amount", 0.0) or 0.0)
+            
+            is_item_excluded = False
+            for target_phrase, words in specific_exclusion_targets:
+                if len(target_phrase) > 4 and target_phrase in desc_lower:
+                    is_item_excluded = True
+                    break
+                for w in words:
+                    if len(w) >= 5 and w in desc_lower:
+                        is_item_excluded = True
+                        break
+                if is_item_excluded:
+                    break
+            if is_item_excluded:
+                excluded_amount += amt
+
+    # ── Room rent sub-limit: calculate excess room charges from bill items ──
+    room_rent_excess = 0.0
+    if (room_rent_sublimit > 0 or icu_sublimit > 0) and all_bill_items:
+        for it in all_bill_items:
+            desc_lower = (getattr(it, "description", "") or "").lower()
+            cat_lower = (getattr(it, "category", "") or "").lower()
+            amt = float(getattr(it, "amount", 0.0) or 0.0)
+            qty = int(getattr(it, "quantity", 1) or 1)
+            if "icu" in desc_lower or "iccu" in desc_lower:
+                if icu_sublimit > 0 and "monitoring" not in desc_lower:
+                    max_allowed = icu_sublimit * qty
+                    if amt > max_allowed:
+                        room_rent_excess += round(amt - max_allowed, 2)
+            elif room_rent_sublimit > 0 and ("ward" in desc_lower or "room" in desc_lower or "bed" in desc_lower or "room & board" in cat_lower):
+                max_allowed = room_rent_sublimit * qty
+                if amt > max_allowed:
+                    room_rent_excess += round(amt - max_allowed, 2)
+
+    # ── Determine the eligible (covered) amount from the bill by matching categories ──
     eligible_amount = total_billed  # default: entire bill is eligible
     if bill_items_by_category and covered_categories:
-        # Semantic mapping: broad policy categories → specific bill item categories
-        # This handles the common case where insurance documents describe coverage broadly
-        # (e.g. "In-Patient Hospitalization") while bills have granular categories
         CATEGORY_SEMANTICS: dict[str, set[str]] = {
-            "in-patient": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation", "physician", "surgeon"},
-            "hospitalization": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation"},
+            "in-patient": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation", "physician", "surgeon", "oncologist", "surgical", "surgery", "procedure", "administration", "monitoring", "investigation", "investigations", "test", "laboratory", "lab", "scan", "radiology", "ct", "pharmacy", "medication", "medications", "drug", "drugs", "fluid", "consumable"},
+            "hospitalization": {"room", "board", "ward", "bed", "nursing", "general", "professional", "fees", "consultation", "physician", "surgeon", "oncologist", "surgical", "surgery", "procedure", "administration", "monitoring", "investigation", "investigations", "test", "laboratory", "lab", "scan", "radiology", "ct", "pharmacy", "medication", "medications", "drug", "drugs", "fluid", "consumable"},
             "icu": {"icu", "iccu", "critical", "intensive", "ventilation", "monitoring", "life support"},
             "critical care": {"icu", "iccu", "critical", "intensive", "ventilation", "monitoring"},
-            "oncology": {"chemotherapy", "oncol", "cancer", "tumor", "radiation", "biopsy", "hpe", "molecular", "imatinib", "targeted"},
-            "surgical": {"surgical", "surgery", "procedure", "operation", "aspiration", "resection"},
+            "oncology": {"chemotherapy", "oncol", "cancer", "tumor", "radiation", "biopsy", "hpe", "molecular", "imatinib", "targeted", "capecitabine", "irinotecan"},
+            "surgical": {"surgical", "surgery", "procedure", "operation", "aspiration", "resection", "cannulation", "biopsy", "colonoscopy"},
             "medical": {"medical", "medicine", "physician", "consultation", "monitoring", "hematological"},
-            "day care": {"day care", "infusion", "hemodialysis", "minor"},
-            "pre-hospitalization": {"pre-hospitalization", "diagnostic", "investigation", "laboratory", "test", "scan", "x-ray", "ecg", "imaging", "pathology"},
+            "day care": {"day care", "infusion", "hemodialysis", "minor", "chemotherapy", "procedure", "administration"},
+            "pre-hospitalization": {"pre-hospitalization", "diagnostic", "investigation", "laboratory", "test", "scan", "x-ray", "ecg", "imaging", "pathology", "biopsy", "cbp", "cbc", "lft", "rft"},
             "post-hospitalization": {"post-hospitalization", "follow-up", "medication", "discharge"},
-            "investigations": {"investigation", "test", "laboratory", "lab", "pathology", "radiology", "scan", "x-ray", "ecg", "biopsy", "cbc", "lft", "rft", "molecular"},
+            "investigations": {"investigation", "test", "laboratory", "lab", "pathology", "radiology", "scan", "x-ray", "ecg", "biopsy", "cbc", "cbp", "lft", "rft", "molecular", "colonoscopy"},
             "pharmacy": {"pharmacy", "medication", "drug", "tablet", "injection", "iv fluid", "consumable", "anti-emetic", "supportive"},
             "room": {"room", "board", "ward", "bed", "nursing"},
             "professional": {"professional", "fees", "consultation", "surgeon", "physician", "oncologist"},
@@ -686,40 +1098,34 @@ def _adjudicate_bill_against_policy(
 
         covered_cats_lower = [c.lower().strip() for c in covered_categories]
         
-        # Build a set of all covered semantic keywords from the policy categories
         covered_keywords: set[str] = set()
         for cc in covered_cats_lower:
             for sem_key, keywords in CATEGORY_SEMANTICS.items():
                 if sem_key in cc or any(w in cc for w in sem_key.split()):
                     covered_keywords.update(keywords)
-            # Also add the individual words from the category itself
             covered_keywords.update(w for w in cc.split() if len(w) > 2)
         
-        # Normalize keywords: add both singular and plural forms for robust matching
         normalized_keywords: set[str] = set()
         for kw in covered_keywords:
             normalized_keywords.add(kw)
-            normalized_keywords.add(kw.rstrip('s'))  # singular
-            normalized_keywords.add(kw + 's')        # plural
+            normalized_keywords.add(kw.rstrip('s'))
+            normalized_keywords.add(kw + 's')
 
         matched_amount = 0.0
         unmatched_amount = 0.0
         for cat, cat_amt in bill_items_by_category.items():
             cat_lower = cat.lower().strip()
             cat_words = set(w for w in re.split(r'[\s/&,]+', cat_lower) if len(w) > 2)
-            # Also add stemmed forms of bill category words
             cat_words_stemmed = set()
             for w in cat_words:
                 cat_words_stemmed.add(w)
                 cat_words_stemmed.add(w.rstrip('s'))
             
             is_covered = False
-            # Direct match
             for cc in covered_cats_lower:
                 if cat_lower in cc or cc in cat_lower:
                     is_covered = True
                     break
-            # Semantic keyword match (with stemming)
             if not is_covered and cat_words_stemmed & normalized_keywords:
                 is_covered = True
 
@@ -728,21 +1134,40 @@ def _adjudicate_bill_against_policy(
             else:
                 unmatched_amount += cat_amt
         
-        # If most (>50%) bill categories match, consider the entire bill eligible
-        # This handles cases where category naming is slightly different
         if matched_amount > 0:
             match_ratio = matched_amount / (matched_amount + unmatched_amount) if (matched_amount + unmatched_amount) > 0 else 1.0
             if match_ratio >= 0.5:
-                # Most items are covered; treat the full bill as eligible
                 eligible_amount = total_billed
             else:
                 eligible_amount = matched_amount
+
+    # Subtract excluded amounts from eligible amount
+    if excluded_amount > 0:
+        eligible_amount = round(max(0.0, eligible_amount - excluded_amount), 2)
+
+    # Subtract room rent excess from eligible amount
+    if room_rent_excess > 0:
+        eligible_amount = round(max(0.0, eligible_amount - room_rent_excess), 2)
+
+    # Apply deductible: reduce eligible amount by the per-claim deductible
+    deductible_applied = 0.0
+    if deductible_amount > 0:
+        deductible_applied = min(deductible_amount, eligible_amount)
+        eligible_amount = round(max(0.0, eligible_amount - deductible_applied), 2)
 
     # Cap eligible amount by sum insured
     if sum_insured > 0:
         eligible_amount = min(eligible_amount, sum_insured)
 
     # Adjudication calculation
+    # At this point, eligible_amount already accounts for:
+    # - Excluded categories (subtracted)
+    # - Room rent sub-limit excess (subtracted)
+    # - Deductible (subtracted)
+    # - Sum insured cap
+    # The gap (total_billed - eligible_amount) = patient's non-coverable portion
+    non_coverable = round(max(0.0, total_billed - eligible_amount), 2)
+
     if has_copay_rule:
         # Percentage-based coverage rule (e.g. 80:20 risk-sharing)
         insurer_pct = coverage_split_pct / 100.0
@@ -761,30 +1186,30 @@ def _adjudicate_bill_against_policy(
         else:
             # Calculate from percentage: patient pays the copay share of eligible amount
             patient_payable = round(eligible_amount - insured_amount, 2)
-        # Add any uncovered amount to patient payable
-        if eligible_amount < total_billed:
-            patient_payable = round(patient_payable + (total_billed - eligible_amount), 2)
+        # Add any non-coverable amount (excluded items, deductible, room excess) to patient payable
+        patient_payable = round(patient_payable + non_coverable, 2)
     elif pre_auth_appr > 0:
         # Pre-authorized trust/insurer sanction exists in document (exact amount)
-        insured_amount = min(total_billed, pre_auth_appr) if total_billed > 0 else pre_auth_appr
+        insured_amount = min(eligible_amount, pre_auth_appr) if eligible_amount > 0 else pre_auth_appr
         patient_payable = policy_patient_oop if policy_patient_oop > 100 else 0.0
-        if patient_payable == 0.0 and total_billed > insured_amount:
+        if patient_payable == 0.0:
             patient_payable = round(total_billed - insured_amount, 2)
     elif copay_pct > 0:
-        copay_amt = round(total_billed * (copay_pct / 100.0), 2)
-        insured_amount = round(total_billed - copay_amt, 2)
-        patient_payable = copay_amt
+        copay_amt = round(eligible_amount * (copay_pct / 100.0), 2)
+        insured_amount = round(eligible_amount - copay_amt, 2)
+        patient_payable = round(copay_amt + non_coverable, 2)
     elif copay_liab > 100:
-        patient_payable = min(total_billed, copay_liab)
+        patient_payable = min(eligible_amount, copay_liab) + non_coverable
         insured_amount = round(total_billed - patient_payable, 2)
     elif "cashless" in cov_type or (copay_liab == 0.0 and copay_pct == 0.0):
         # Full cashless scheme (e.g. Dr. YSR Aarogyasri / AB-PMJAY)
+        # Use eligible_amount which already excludes deductible, exclusions, room excess
         max_limit = sum_insured if sum_insured > 0 else 2500000.0
-        insured_amount = min(total_billed, max_limit)
-        patient_payable = round(max(0.0, total_billed - insured_amount), 2)
+        insured_amount = min(eligible_amount, max_limit)
+        patient_payable = round(total_billed - insured_amount, 2)
     else:
-        insured_amount = total_billed
-        patient_payable = 0.0
+        insured_amount = eligible_amount
+        patient_payable = round(non_coverable, 2)
 
     coverage_pct = round((insured_amount / total_billed * 100.0), 1) if total_billed > 0 else 100.0
 
@@ -1240,6 +1665,24 @@ def unify_patient_bundles(
             obs["meta"]["profile"] = [ABDM_OBSERVATION_PROFILE]
         obs_id = obs["id"]
         obs_references.append({"reference": f"urn:uuid:{obs_id}"})
+
+        # Ensure observation has canonical LOINC code from LOINC 2.83
+        code_obj = obs.get("code") or {}
+        codings = code_obj.get("coding") or []
+        has_loinc = any(c.get("system") == "http://loinc.org" and c.get("code") for c in codings if isinstance(c, dict))
+        if not has_loinc:
+            tname = code_obj.get("text") or (codings[0].get("display") if codings else "")
+            if tname:
+                loinc_match = _lookup_loinc(tname)
+                if loinc_match:
+                    new_codings = [c for c in codings if isinstance(c, dict) and c.get("system") != "http://loinc.org"]
+                    new_codings.insert(0, {
+                        "system": "http://loinc.org",
+                        "code": loinc_match[0],
+                        "display": loinc_match[1],
+                    })
+                    code_obj["coding"] = new_codings
+                    obs["code"] = code_obj
 
         performers = obs.get("performer", []) or []
         cleaned_performers = []

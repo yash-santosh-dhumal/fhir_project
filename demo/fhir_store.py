@@ -201,8 +201,22 @@ class FhirStore:
             code = r.get("code", {}) or {}
             codings = code.get("coding", []) or []
             loinc = next(
-                (c for c in codings if c.get("system") == "http://loinc.org"), None
+                (c for c in codings if c.get("system") == "http://loinc.org" and c.get("code")), None
             )
+            if not loinc:
+                c_text = code.get("text", "")
+                if c_text:
+                    try:
+                        from fhir_unifier import _lookup_loinc
+                    except ImportError:
+                        from demo.fhir_unifier import _lookup_loinc
+                    loinc_match = _lookup_loinc(c_text)
+                    if loinc_match:
+                        loinc = {"system": "http://loinc.org", "code": loinc_match[0], "display": loinc_match[1]}
+                        codings = [c for c in codings if c.get("system") != "http://loinc.org"]
+                        codings.insert(0, loinc)
+                        code["coding"] = codings
+                        r["code"] = code
             vq = r.get("valueQuantity") or {}
             ref_ranges = r.get("referenceRange", []) or []
             ref_text = ref_ranges[0].get("text", "") if ref_ranges else ""

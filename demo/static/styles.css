@@ -229,6 +229,106 @@ a:hover { text-decoration:underline; }
 .step-desc { font-size:.72rem; color:var(--text-muted); transition:color .3s; }
 .step-item.active .step-desc { color:var(--accent); font-weight:500; }
 
+/* ── Live Processing Logs in Stepper Card ── */
+.pipeline-log-box {
+  margin-top: 22px;
+  background: rgba(10, 15, 28, 0.85);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+}
+.pipeline-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pipeline-log-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pipeline-log-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin-log 0.85s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+@keyframes spin-log {
+  to { transform: rotate(360deg); }
+}
+.pipeline-log-elapsed {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+.pipeline-log-list {
+  font-family: var(--font-mono);
+  font-size: 0.80rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.pipeline-log-list::-webkit-scrollbar {
+  width: 5px;
+}
+.pipeline-log-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.pipeline-log-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  animation: log-slide-in 0.25s ease forwards;
+}
+.pipeline-log-item.active {
+  color: #93c5fd;
+  font-weight: 500;
+}
+.pipeline-log-item.success {
+  color: #34d399;
+  font-weight: 600;
+}
+.pipeline-log-item.error {
+  color: #f87171;
+  font-weight: 600;
+}
+.pipeline-log-ts {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  min-width: 52px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.pipeline-log-msg {
+  flex: 1;
+}
+@keyframes log-slide-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ── Muted text ── */
 .muted { color:var(--text-muted); font-size:.82rem; }
 
@@ -1395,225 +1495,358 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
 
 /* ═══ Print Stylesheet for High-End Hospital Medical Report ═══ */
 @media print {
-  body {
+  :root {
+    --bg-primary: #ffffff !important;
+    --bg-secondary: #ffffff !important;
+    --bg-card: #ffffff !important;
+    --bg-input: #f8fafc !important;
+    --border: #cbd5e1 !important;
+    --text-primary: #0f172a !important;
+    --text-secondary: #334155 !important;
+    --text-muted: #64748b !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  html, body {
     background: #ffffff !important;
     color: #0f172a !important;
-    font-size: 11pt !important;
+    font-size: 9.5pt !important;
+    line-height: 1.35 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
-  .hero, .flow, .disclaimer, .tab-nav, .upload-section, .stepper-card,
+
+  /* Hide all non-printable application shell, navigation, modals, and list cards */
+  .portal-switcher, .hero, .tab-nav, .upload-section, .stepper-card,
+  #tab-upload, .tab-panel:not(.active),
+  #patientsListCard, #tab-patients > section.card:first-child,
   #validationSection, #summaryGrid, .raw-card, #tab-batch, #tab-explorer,
-  #patientsList, .section-header, .report-footer .report-actions,
+  #patientsList, .section-header, .report-footer, .report-actions,
   #reportBundleSelect, #toggleReportJsonBtn, #copyReportJsonBtn, #reportRawJsonWrap,
   .obs-toolbar, .pc-delete-btn, #downloadReportJsonBtn, #deleteCurrentReportBtn,
-  .portal-switcher, #closePatientDetailBtn, .iop-bundle-selector, .report-footer,
-  .report-actions, .obs-count-badge {
+  #closePatientDetailBtn, .iop-bundle-selector, .obs-count-badge,
+  .modal-backdrop, .pipeline-log-box {
     display: none !important;
   }
-  .patient-report-card {
+
+  .page {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #tab-patients {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  .patient-report-card,
+  #patientDetail {
+    display: block !important;
     background: #ffffff !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
     box-shadow: none !important;
+    width: 100% !important;
   }
+
   .report-frame {
     background: #ffffff !important;
-    border: 2px solid #0f172a !important;
+    border: 1.5px solid #0f172a !important;
+    border-radius: 4px !important;
     box-shadow: none !important;
-    padding: 24px !important;
+    padding: 16px 20px !important;
     color: #0f172a !important;
+    margin: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
     page-break-after: auto;
   }
+
   .report-top-bar {
     border-bottom: 2px solid #0f172a !important;
-    padding-bottom: 14px !important;
-    margin-bottom: 16px !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
     color: #0f172a !important;
   }
+
+  .report-branding .report-icon-box {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #2563eb !important;
+  }
+
   .report-branding .report-title-box h3 {
     color: #0f172a !important;
-    font-size: 16pt !important;
+    font-size: 15pt !important;
     font-weight: 800 !important;
   }
+
   .report-branding .report-title-box p {
     color: #475569 !important;
     font-size: 8pt !important;
   }
+
   .report-status-pill {
     background: #f1f5f9 !important;
     color: #0f172a !important;
     border: 1px solid #94a3b8 !important;
+    font-size: 8pt !important;
   }
+
   .report-meta-tag {
     color: #334155 !important;
+    font-size: 8pt !important;
   }
+
   .report-dossier-wrap {
+    display: grid !important;
     grid-template-columns: 1fr 1fr !important;
-    gap: 12px !important;
-    margin-bottom: 16px !important;
+    gap: 10px !important;
+    margin-bottom: 14px !important;
     page-break-inside: avoid;
   }
+
   .report-dossier-card {
     background: #ffffff !important;
     border: 1px solid #94a3b8 !important;
     color: #0f172a !important;
     box-shadow: none !important;
+    padding: 10px 14px !important;
     page-break-inside: avoid;
   }
+
   .dossier-card-header {
     border-bottom: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
+    padding-bottom: 6px !important;
+    margin-bottom: 8px !important;
   }
+
   .dossier-card-header h4 {
     color: #0f172a !important;
     font-size: 9pt !important;
   }
+
   .dossier-label {
     color: #64748b !important;
     font-size: 7.5pt !important;
   }
+
   .dossier-val {
     color: #0f172a !important;
-    font-size: 9.5pt !important;
+    font-size: 9pt !important;
   }
+
   .dossier-val.highlight {
     color: #0f172a !important;
-    font-size: 13pt !important;
+    font-size: 11.5pt !important;
+    font-weight: 800 !important;
   }
+
   .id-tag.green, .id-tag.blue, .id-tag.purple {
     background: #f1f5f9 !important;
     color: #0f172a !important;
     border: 1px solid #94a3b8 !important;
   }
+
   .blood-group-badge {
     background: #fef2f2 !important;
     color: #b91c1c !important;
     border: 1px solid #f87171 !important;
   }
+
   .addr-tag {
     background: #f8fafc !important;
     border: 1px solid #cbd5e1 !important;
     color: #334155 !important;
   }
-  .addr-tag strong {
-    color: #0f172a !important;
-  }
+
   .address-text {
     color: #0f172a !important;
   }
+
   .physician-row strong {
     color: #0f172a !important;
   }
+
   .report-profile-strip {
     background: #f8fafc !important;
     border: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
-    margin-bottom: 16px !important;
+    margin-bottom: 14px !important;
+    padding: 6px 12px !important;
+    font-size: 8pt !important;
     page-break-inside: avoid;
   }
+
   .report-clinical-section {
-    background: #f8fafc !important;
+    background: #ffffff !important;
     border: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
-    margin-bottom: 16px !important;
+    margin-bottom: 14px !important;
+    padding: 12px 16px !important;
     page-break-inside: avoid;
   }
-  .clinical-section-title-wrap h4 {
+
+  .report-clinical-section div[style*="background"] {
+    background: #f8fafc !important;
+    border-color: #cbd5e1 !important;
     color: #0f172a !important;
   }
+
+  .report-clinical-section span,
+  .report-clinical-section p,
+  .report-clinical-section td,
+  .report-clinical-section th,
+  .report-clinical-section strong {
+    color: #0f172a !important;
+  }
+
+  .clinical-section-header {
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .clinical-section-title-wrap h4 {
+    color: #0f172a !important;
+    font-size: 9.5pt !important;
+  }
+
   .clinical-cat-card {
     background: #ffffff !important;
     border: 1px solid #cbd5e1 !important;
   }
+
   .clinical-list li {
     color: #0f172a !important;
   }
+
   .diag-pill {
     background: #fef2f2 !important;
     color: #991b1b !important;
     border: 1px solid #fca5a5 !important;
   }
+
   .med-pill {
     background: #eff6ff !important;
     color: #1e40af !important;
     border: 1px solid #bfdbfe !important;
   }
+
   .report-table {
     border: 1px solid #cbd5e1 !important;
     width: 100% !important;
     page-break-inside: auto;
   }
+
   .report-table th {
     background: #f1f5f9 !important;
     color: #0f172a !important;
     border-bottom: 2px solid #94a3b8 !important;
     font-size: 8.5pt !important;
+    padding: 6px 8px !important;
   }
+
   .report-table td {
     border-bottom: 1px solid #e2e8f0 !important;
     color: #0f172a !important;
-    font-size: 8.5pt !important;
+    font-size: 8pt !important;
+    padding: 5px 8px !important;
   }
+
   .report-table tr {
     page-break-inside: avoid;
   }
+
   .test-name-cell div {
     color: #0f172a !important;
     font-weight: 700 !important;
   }
+
   .value-cell {
     color: #0f172a !important;
     font-weight: 800 !important;
   }
+
   .loinc-badge {
     background: #f8fafc !important;
     color: #0f172a !important;
     border: 1px solid #cbd5e1 !important;
   }
+
   .flag-badge.normal {
     background: #ecfdf5 !important;
     color: #065f46 !important;
     border: 1px solid #10b981 !important;
   }
+
   .flag-badge.high, .flag-badge.critical {
     background: #fef2f2 !important;
     color: #991b1b !important;
     border: 1px solid #ef4444 !important;
   }
+
   .flag-badge.low {
     background: #ecfeff !important;
     color: #155e75 !important;
     border: 1px solid #06b6d4 !important;
   }
+
   .report-manifest-section {
     background: #ffffff !important;
     border: 1px solid #cbd5e1 !important;
     color: #0f172a !important;
     page-break-inside: avoid;
   }
+
   .manifest-grid {
     max-height: none !important;
     overflow: visible !important;
   }
+
   .manifest-card {
     background: #f8fafc !important;
     border: 1px solid #e2e8f0 !important;
   }
+
   .manifest-card-name {
     color: #0f172a !important;
   }
+
   .manifest-card-summary {
     color: #475569 !important;
   }
+
   .report-signoff-block {
     background: #ffffff !important;
     border: 1px solid #94a3b8 !important;
     color: #0f172a !important;
     page-break-inside: avoid;
+    padding: 12px 16px !important;
+    margin-top: 14px !important;
   }
+
   .signoff-col .signoff-name {
     color: #0f172a !important;
   }
+
+  .signoff-col .signoff-sub {
+    color: #475569 !important;
+  }
+
   .signoff-stamp {
     background: #ecfdf5 !important;
     color: #065f46 !important;
@@ -1621,10 +1854,6 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
   }
 
   /* ═══ One-Page Insurance Print Report Strict Layout ═══ */
-  @page {
-    size: A4 portrait;
-    margin: 6mm 8mm;
-  }
   .insurance-onepage-report {
     background: #ffffff !important;
     color: #0f172a !important;

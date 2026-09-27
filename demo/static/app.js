@@ -686,10 +686,162 @@ function markAllStagesDone() {
   if (trackFill) trackFill.style.width = "82%";
 }
 
+// ═══════════════════════════════════════════════
+// Live Pipeline Status Logs
+// ═══════════════════════════════════════════════
+
+let pipelineLogInterval = null;
+let pipelineLogStartTime = null;
+
+function clearPipelineLogs() {
+  if (pipelineLogInterval) {
+    clearInterval(pipelineLogInterval);
+    pipelineLogInterval = null;
+  }
+  pipelineLogStartTime = null;
+  const feed = $("#pipelineLogFeed");
+  const list = $("#pipelineLogList");
+  const spinner = $("#pipelineLogSpinner");
+  const titleTxt = $("#pipelineLogTitleText");
+  const elapsed = $("#pipelineLogElapsed");
+  if (feed) feed.hidden = true;
+  if (list) list.innerHTML = "";
+  if (spinner) spinner.style.display = "inline-block";
+  if (titleTxt) titleTxt.textContent = "Processing Pipeline Logs";
+  if (elapsed) elapsed.textContent = "0.0s elapsed";
+}
+
+function appendPipelineLog(message, type = "normal") {
+  const feed = $("#pipelineLogFeed");
+  const list = $("#pipelineLogList");
+  const elapsedEl = $("#pipelineLogElapsed");
+  if (!feed || !list) return;
+
+  feed.hidden = false;
+
+  const now = performance.now();
+  const sec = pipelineLogStartTime ? ((now - pipelineLogStartTime) / 1000).toFixed(1) : "0.0";
+  if (elapsedEl) {
+    elapsedEl.textContent = `${sec}s elapsed`;
+  }
+
+  const prevItems = list.querySelectorAll(".pipeline-log-item.active");
+  prevItems.forEach(item => item.classList.remove("active"));
+
+  const logItem = document.createElement("div");
+  logItem.className = `pipeline-log-item ${type}`;
+  logItem.innerHTML = `
+    <span class="pipeline-log-ts">[${sec}s]</span>
+    <span class="pipeline-log-msg">${escapeHtml(message)}</span>
+  `;
+  list.appendChild(logItem);
+  list.scrollTop = list.scrollHeight;
+}
+
+function startPipelineLogs(isZip) {
+  clearPipelineLogs();
+  pipelineLogStartTime = performance.now();
+  const feed = $("#pipelineLogFeed");
+  if (feed) feed.hidden = false;
+
+  const elapsedEl = $("#pipelineLogElapsed");
+  pipelineLogInterval = setInterval(() => {
+    if (pipelineLogStartTime && elapsedEl) {
+      const sec = ((performance.now() - pipelineLogStartTime) / 1000).toFixed(1);
+      elapsedEl.textContent = `${sec}s elapsed`;
+    }
+  }, 100);
+
+  if (isZip) {
+    appendPipelineLog("📂 Uploading archive & validating file structure...", "active");
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🔍 Unpacking archive & scanning nested dossiers for clinical documents...", "active");
+    }, 700));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🤖 Launching Gemini Document AI & clinical extraction engine...", "active");
+    }, 2000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🔬 Analyzing diagnostic reports, pathology tests & laboratory panels...", "active");
+    }, 4500));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🧾 Extracting hospital bills, consultation fees & diagnostic line items...", "active");
+    }, 7500));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🧬 Mapping clinical laboratory tests & analytes to standard LOINC 2.83 codes...", "active");
+    }, 10500));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("📋 Generating ABDM FHIR R4 Bundle (Patient, DiagnosticReport, Observation, Claim)...", "active");
+    }, 14000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🛡️ Validating FHIR resources against ABDM profile schemas & structure definitions...", "active");
+    }, 18000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("💾 Consolidating patient documents into unified longitudinal clinical record...", "active");
+    }, 22500));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("⏳ Finalizing FHIR store commit and preparing patient record...", "active");
+    }, 27000));
+  } else {
+    appendPipelineLog("📄 Uploading document & validating format...", "active");
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🤖 Processing document understanding with Gemini vision AI...", "active");
+    }, 600));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🔬 Extracting clinical observations, lab analytes & reference ranges...", "active");
+    }, 2000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🧬 Standardizing laboratory tests to LOINC 2.83 codes...", "active");
+    }, 4000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("📋 Building ABDM FHIR R4 DiagnosticReport & Document Bundle...", "active");
+    }, 6000));
+    stageTimers.push(setTimeout(() => {
+      appendPipelineLog("🛡️ Validating against ABDM profiles & committing to FHIR store...", "active");
+    }, 8500));
+  }
+}
+
+function completePipelineLogs(success, details = "") {
+  if (pipelineLogInterval) {
+    clearInterval(pipelineLogInterval);
+    pipelineLogInterval = null;
+  }
+  const spinner = $("#pipelineLogSpinner");
+  const titleTxt = $("#pipelineLogTitleText");
+  if (spinner) spinner.style.display = "none";
+
+  if (success) {
+    if (titleTxt) titleTxt.textContent = "Processing Pipeline Completed";
+    appendPipelineLog(details || "✅ Complete! Unified ABDM FHIR record created and saved.", "success");
+  } else {
+    if (titleTxt) titleTxt.textContent = "Processing Pipeline Failed";
+    appendPipelineLog(details || "❌ Processing failed.", "error");
+  }
+}
+
 async function convertSelectedFile() {
   if (!selectedFile) return;
   resetUI();
   updateStepper(0);
+
+  // Smoothly scroll down to the 'Processing Pipeline Status' section
+  const stepperCard = document.querySelector(".stepper-card");
+  if (stepperCard) {
+    stepperCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => {
+      stepperCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
+
+  const isZip = Boolean(
+    selectedFile &&
+    (selectedFile.name.toLowerCase().endsWith(".zip") ||
+     selectedFile.type === "application/zip" ||
+     selectedFile.type === "application/x-zip-compressed")
+  );
+
+  // Start live human-readable progress logs
+  startPipelineLogs(isZip);
 
   const formData = new FormData();
   formData.append("file", selectedFile);
@@ -736,6 +888,21 @@ async function convertSelectedFile() {
       markAllStagesDone();
     }, 300);
 
+    // Complete live logs with human-readable success summary
+    let successMsg = "✅ Complete! Unified FHIR bundle generated and stored.";
+    if (data.is_archive && data.archive_info) {
+      const info = data.archive_info;
+      const totalDocs = info.documents_found || info.documents_processed || info.documents_unified || 0;
+      const pName = info.patient_name || data.summary?.patient?.name || "Patient";
+      const obsCount = info.observations_count || (data.summary?.observations || []).length;
+      successMsg = `✅ Success: ${totalDocs} documents unified into ABDM FHIR record for ${pName} (${obsCount} observations extracted).`;
+    } else {
+      const obsCount = (data.summary?.observations || []).length;
+      const pName = data.summary?.patient?.name || "Patient";
+      successMsg = `✅ Success: Document converted to ABDM FHIR record for ${pName} (${obsCount} observations).`;
+    }
+    completePipelineLogs(true, successMsg);
+
     // Render results
     const raw = data.raw || {};
     rawJsonEl.textContent = JSON.stringify(raw, null, 2);
@@ -745,59 +912,43 @@ async function convertSelectedFile() {
     const summary = data.summary || {};
     renderValidation(data.validation);
 
-    // If a ZIP archive was processed, do NOT display the 'FHIR Resource Summary' & 'Extracted Clinical Data' sections.
-    // Instead, display a prominent button to navigate directly to the patient records report.
-    const isZipArchive = data.is_archive || (selectedFile && selectedFile.name.toLowerCase().endsWith(".zip"));
+    // Hide summary grid if present
+    const sumGrid = $("#summaryGrid");
+    if (sumGrid) {
+      sumGrid.hidden = true;
+      sumGrid.style.display = "none";
+    }
+    const adjSec = $("#insuranceAdjudicationSection");
+    if (adjSec) {
+      adjSec.hidden = true;
+      adjSec.style.display = "none";
+    }
+    const ipSec = $("#insurancePlanSection");
+    if (ipSec) {
+      ipSec.hidden = true;
+      ipSec.style.display = "none";
+    }
 
-    if (isZipArchive) {
-      const sumGrid = $("#summaryGrid");
-      if (sumGrid) {
-        sumGrid.hidden = true;
-        sumGrid.style.display = "none";
-      }
-      const adjSec = $("#insuranceAdjudicationSection");
-      if (adjSec) {
-        adjSec.hidden = true;
-        adjSec.style.display = "none";
-      }
-      const ipSec = $("#insurancePlanSection");
-      if (ipSec) {
-        ipSec.hidden = true;
-        ipSec.style.display = "none";
-      }
+    // Show View Report action banner
+    const viewReportSec = $("#viewReportSection");
+    if (viewReportSec) {
+      viewReportSec.hidden = false;
+      viewReportSec.style.display = "block";
+    }
 
-      const viewReportSec = $("#viewReportSection");
-      if (viewReportSec) {
-        viewReportSec.hidden = false;
-        viewReportSec.style.display = "block";
-      }
+    const viewReportBtn = $("#viewReportBtn");
+    if (viewReportBtn) {
+      viewReportBtn.onclick = () => {
+        navigateToPatientReport(data.patient_id, data.archive_info?.patient_name || data.summary?.patient?.name);
+      };
+    }
 
-      const viewReportBtn = $("#viewReportBtn");
-      if (viewReportBtn) {
-        viewReportBtn.onclick = () => {
-          navigateToPatientReport(data.patient_id, data.archive_info?.patient_name);
-        };
-      }
-    } else {
-      renderSummary(summary);
-
-      // Render insurance plan or claim summary if available
-      if (portalMode === "insurance" && data.insurance_plan) {
+    // If insurance mode and has insurance plan / claim
+    if (portalMode === "insurance") {
+      if (data.insurance_plan) {
         renderInsurancePlan(data.insurance_plan, data.validation, (data.stored_bundle_ids && data.stored_bundle_ids[0]) || data.raw?.id);
-      } else {
-        const ipSec = $("#insurancePlanSection");
-        if (ipSec) {
-          ipSec.hidden = true;
-          ipSec.style.display = "none";
-        }
-        const sumGrid = $("#summaryGrid");
-        if (sumGrid) {
-          sumGrid.hidden = false;
-          sumGrid.style.display = "";
-        }
-        if (portalMode === "insurance" && data.claim_summary) {
-          renderClaimSummary(data.claim_summary);
-        }
+      } else if (data.claim_summary) {
+        renderClaimSummary(data.claim_summary);
       }
     }
 
@@ -806,6 +957,7 @@ async function convertSelectedFile() {
 
   } catch (err) {
     clearStageTimers();
+    completePipelineLogs(false, `❌ Processing failed: ${err.message}`);
     errorBox.textContent = `Error: ${err.message}`;
     errorBox.hidden = false;
   }
@@ -846,6 +998,7 @@ async function navigateToPatientReport(patientId, patientName) {
 
 function resetUI() {
   clearStageTimers();
+  clearPipelineLogs();
   errorBox.hidden = true;
   errorBox.textContent = "";
   rawJsonEl.textContent = "{}";
@@ -1438,6 +1591,17 @@ async function deletePatient(patientId, patientName) {
     alert(`Error deleting patient: ${err.message}`);
   }
 }
+
+function printPatientReport() {
+  const detail = $("#patientDetail");
+  if (!detail || detail.hidden) {
+    alert("Please select and view a patient report first before printing.");
+    return;
+  }
+  detail.hidden = false;
+  window.print();
+}
+window.printPatientReport = printPatientReport;
 
 async function viewPatient(patientId) {
   const detail = $("#patientDetail");
@@ -2498,7 +2662,7 @@ async function viewPatient(patientId) {
               Bundle ID: <code>${escapeHtml((selectedBundle.id || '').slice(0, 24))}...</code> • Digital FHIR Record
             </div>
             <div class="report-actions">
-              <button class="secondary small" id="printReportBtn" type="button">
+              <button class="secondary small print-report-btn" id="printHospitalReportFooterBtn" type="button" onclick="printPatientReport()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 Print Report
               </button>
@@ -2587,11 +2751,10 @@ async function viewPatient(patientId) {
         });
       });
 
-      // Wire up print button
-      const printBtn = $("#printReportBtn");
-      if (printBtn) {
-        printBtn.addEventListener("click", () => window.print());
-      }
+      // Wire up print buttons
+      $$(".print-report-btn").forEach((btn) => {
+        btn.onclick = () => printPatientReport();
+      });
 
       // Wire up download JSON button
       const downloadBtn = $("#downloadReportJsonBtn");
@@ -2858,7 +3021,7 @@ function _renderInsurancePlanReportHtml(params) {
           Bundle ID: <code>${escapeHtml((bid || '').slice(0, 24))}...</code> • Digital Insurance Plan Record
         </div>
         <div class="report-actions">
-          <button class="secondary small" id="printReportBtn" type="button">
+          <button class="secondary small print-report-btn" id="printInsurancePlanBtn" type="button" onclick="printPatientReport()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
             Print
           </button>
@@ -2886,10 +3049,9 @@ function _wireInsurancePlanReportEvents(selectedBundle, bundleIdx, bundleJson, p
     });
   }
 
-  const printBtn = $("#printReportBtn");
-  if (printBtn) {
-    printBtn.addEventListener("click", () => window.print());
-  }
+  $$(".print-report-btn").forEach((btn) => {
+    btn.onclick = () => printPatientReport();
+  });
 
   const downloadBtn = $("#downloadReportJsonBtn");
   if (downloadBtn) {
@@ -3271,33 +3433,14 @@ function _renderInsuranceOnePageReportHtml(params) {
           <span>Claim Financial Details &amp; Adjudicated Settlement Amounts</span>
         </div>
         <div class="iop-panel-body">
+          ${preAuthAmt && preAuthAmt !== "—" ? `
           <div class="iop-financial-ribbon">
-            <div class="iop-fin-box highlight-primary">
-              <div class="iop-fin-lbl">Total Claimed</div>
-              <div class="iop-fin-amt">${escapeHtml(totalClaimedAmt)}</div>
-              <div class="iop-fin-sub">Net Claim Submitted</div>
-            </div>
-            <div class="iop-fin-box">
-              <div class="iop-fin-lbl">Gross Hospital Bill</div>
-              <div class="iop-fin-amt">${escapeHtml(grossBillAmt)}</div>
-              <div class="iop-fin-sub">Invoiced Hospital Total</div>
-            </div>
             <div class="iop-fin-box">
               <div class="iop-fin-lbl">Pre-Authorized</div>
               <div class="iop-fin-amt">${escapeHtml(preAuthAmt)}</div>
               <div class="iop-fin-sub">TPA Initial Sanction</div>
             </div>
-            <div class="iop-fin-box highlight-success">
-              <div class="iop-fin-lbl">Final Approved</div>
-              <div class="iop-fin-amt">${escapeHtml(approvedAmt)}</div>
-              <div class="iop-fin-sub">Payable Settlement</div>
-            </div>
-            <div class="iop-fin-box highlight-info">
-              <div class="iop-fin-lbl">Sum Insured</div>
-              <div class="iop-fin-amt">${escapeHtml(sumInsuredAmt)}</div>
-              <div class="iop-fin-sub">Policy Annual Limit</div>
-            </div>
-          </div>
+          </div>` : ""}
 
           <!-- Itemized Charges Table -->
           ${itemizedHtml}
@@ -3344,7 +3487,7 @@ function _renderInsuranceOnePageReportHtml(params) {
           Bundle ID: <code>${escapeHtml((selectedBundle.id || '').slice(0, 24))}...</code> • Digital Insurance Claim Record
         </div>
         <div class="report-actions">
-          <button class="secondary small" id="printReportBtn" type="button">
+          <button class="secondary small print-report-btn" id="printInsuranceReportBtn" type="button" onclick="printPatientReport()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
             Print Report
           </button>
@@ -3377,10 +3520,9 @@ function _wireInsuranceReportEvents(selectedBundle, bundleIdx, bundleJson, pName
     });
   }
 
-  const printBtn = $("#printReportBtn");
-  if (printBtn) {
-    printBtn.addEventListener("click", () => window.print());
-  }
+  $$(".print-report-btn").forEach((btn) => {
+    btn.onclick = () => printPatientReport();
+  });
 
   const downloadBtn = $("#downloadReportJsonBtn");
   if (downloadBtn) {
@@ -3738,56 +3880,7 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
     flagsHtml = `<div class="claim-flags" style="margin-bottom:12px">${flags.map(f => `<span class="claim-flag">${escapeHtml(f)}</span>`).join("")}</div>`;
   }
 
-  // Build financial highlight metrics - strictly require valid numeric amounts
-  const hasValidClaimed = _isValidAmount(kf.total_claimed_amount);
-  const hasValidGross = _isValidAmount(kf.gross_bill_amount);
-  const hasValidNet = _isValidAmount(kf.net_claimed_amount) && kf.net_claimed_amount !== kf.total_claimed_amount;
-  const hasValidPreAuth = _isValidAmount(kf.pre_authorized_amount);
-  const hasValidApproved = _isValidAmount(kf.approved_amount);
-  const hasValidSumInsured = _isValidAmount(kf.sum_insured);
-  const hasClaimType = Boolean(kf.claim_type);
 
-  const hasFinancials = hasValidClaimed || hasValidGross || hasValidNet || hasValidPreAuth || hasValidApproved || hasValidSumInsured || hasClaimType;
-
-  const financialMetricsHtml = hasFinancials ? `
-    <div class="claim-financial-highlight-bar">
-      ${hasValidClaimed ? `
-        <div class="claim-metric-badge primary">
-          <span class="metric-lbl">Total Claimed</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.total_claimed_amount))}</span>
-        </div>` : ""}
-      ${hasValidNet ? `
-        <div class="claim-metric-badge">
-          <span class="metric-lbl">Net Claimed</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.net_claimed_amount))}</span>
-        </div>` : ""}
-      ${hasValidGross ? `
-        <div class="claim-metric-badge">
-          <span class="metric-lbl">Gross Hospital Bill</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.gross_bill_amount))}</span>
-        </div>` : ""}
-      ${hasValidPreAuth ? `
-        <div class="claim-metric-badge">
-          <span class="metric-lbl">Pre-Authorized</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.pre_authorized_amount))}</span>
-        </div>` : ""}
-      ${hasValidApproved ? `
-        <div class="claim-metric-badge success">
-          <span class="metric-lbl">Approved / Sanctioned</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.approved_amount))}</span>
-        </div>` : ""}
-      ${hasValidSumInsured ? `
-        <div class="claim-metric-badge info">
-          <span class="metric-lbl">Sum Insured</span>
-          <span class="metric-val">${escapeHtml(_formatAmount(kf.sum_insured))}</span>
-        </div>` : ""}
-      ${hasClaimType ? `
-        <div class="claim-metric-badge">
-          <span class="metric-lbl">Claim Type</span>
-          <span class="metric-val">${escapeHtml(kf.claim_type)}</span>
-        </div>` : ""}
-    </div>
-  ` : "";
 
   // Build the claim summary card HTML
   return `
@@ -3851,8 +3944,17 @@ function _renderInsuranceClaimCards(resources, pName, pGender, pDob, pAge, pGuar
               <span class="dossier-label">Room Category</span>
               <span class="dossier-val">${escapeHtml(roomCategory)}</span>
             </div>` : ""}
+            ${kf.claim_type ? `
+            <div class="dossier-item">
+              <span class="dossier-label">Claim Type</span>
+              <span class="dossier-val">${escapeHtml(kf.claim_type)}</span>
+            </div>` : ""}
+            ${_isValidAmount(kf.pre_authorized_amount) ? `
+            <div class="dossier-item">
+              <span class="dossier-label">Pre-Authorized</span>
+              <span class="dossier-val mono">${escapeHtml(_formatAmount(kf.pre_authorized_amount))}</span>
+            </div>` : ""}
           </div>
-          ${financialMetricsHtml}
           ${pAddress ? `
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
             <span class="dossier-label">Address</span>

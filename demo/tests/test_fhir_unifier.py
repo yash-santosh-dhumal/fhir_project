@@ -365,6 +365,113 @@ class TestFhirUnifier(unittest.TestCase):
         sec_titles = [s.get("title") for s in composition.get("section", [])]
         self.assertIn("Insurance Coverage & Claim Adjudication", sec_titles)
 
+    def test_adjudication_ap12362013_copay_rule(self):
+        from demo.fhir_unifier import _adjudicate_bill_against_policy
+        from demo.gemini_ocr import ExtractedBillingData, ExtractedBillingItem, ExtractedInsurancePolicy
+
+        bill = ExtractedBillingData(
+            bill_number="BILL/ONC/129358/2026",
+            total_amount=26688.0,
+            source_document="Hospital_Bill_AP12362013.pdf",
+            items=[
+                ExtractedBillingItem(description="General Ward Charges", amount=2805.0, category="Room & Board", quantity=3, unit_price=935.0),
+                ExtractedBillingItem(description="Surgeon Consultation", amount=535.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="Oncologist Consultation", amount=698.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="Physician Consultation", amount=449.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="General Investigations", amount=998.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Complete Blood Count (CBC)", amount=407.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Liver Function Tests (LFT)", amount=770.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Renal Function Tests (RFT)", amount=639.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Blood Sugar (Fasting & PP)", amount=259.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="ECG", amount=225.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Chest X-Ray", amount=439.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Chemotherapy Administration (Capecitabine Cycle)", amount=12655.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="IV Cannulation & Fluid Management", amount=530.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="Vital Monitoring", amount=570.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="Capecitabine 825mg Tablets (course)", amount=3045.0, category="Pharmacy / Medications", quantity=1),
+                ExtractedBillingItem(description="Anti-emetics & Supportive Medications", amount=732.0, category="Pharmacy / Medications", quantity=1),
+                ExtractedBillingItem(description="IV Fluids & Consumables", amount=932.0, category="Pharmacy / Medications", quantity=1),
+            ],
+        )
+
+        policy = ExtractedInsurancePolicy(
+            policy_number="1739112612362013",
+            scheme_or_insurer="Star Health and Allied Insurance",
+            annual_sum_insured=10000000.0,
+            copayment_percentage=20.0,
+            coverage_type="Indemnity Health Insurance",
+            covered_categories=["In-patient Treatment", "Day care Treatment", "Pre-Hospitalization", "Post-Hospitalization"],
+            excluded_categories=["Investigation & Evaluation", "Rest Cure", "Cosmetic Surgery", "Convalescence, general debility"],
+            terms_and_rules="20% co-payment applicable on every admissible claim amount. NIL deductible.",
+        )
+
+        adj = _adjudicate_bill_against_policy([bill], policy)
+        self.assertEqual(adj["total_billed"], 26688.0)
+        self.assertEqual(adj["insured_amount"], 21350.40)
+        self.assertEqual(adj["patient_payable"], 5337.60)
+        self.assertEqual(adj["coverage_percentage"], 80.0)
+        self.assertEqual(adj["status"], "Partially Covered (80.0%)")
+
+    def test_adjudication_ap12362282_deductible_and_exclusions(self):
+        from demo.fhir_unifier import _adjudicate_bill_against_policy
+        from demo.gemini_ocr import ExtractedBillingData, ExtractedBillingItem, ExtractedInsurancePolicy
+
+        bill = ExtractedBillingData(
+            bill_number="BILL/ONC/129357/2026",
+            total_amount=77832.0,
+            source_document="Hospital_Bill_AP12362282.pdf",
+            items=[
+                ExtractedBillingItem(description="General Ward Charges", amount=820.0, category="Room & Board", quantity=1),
+                ExtractedBillingItem(description="ICU Charges", amount=3312.0, category="Room & Board", quantity=1),
+                ExtractedBillingItem(description="Surgeon Consultation", amount=616.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="Oncologist Consultation", amount=919.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="Physician Consultation", amount=444.0, category="Professional Fees", quantity=1),
+                ExtractedBillingItem(description="Complete Blood Picture (CBP)", amount=366.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Renal Function Tests (RFT)", amount=632.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Colonoscopy", amount=3278.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Biopsy & Histopathology", amount=2222.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="CT Abdomen & Pelvis", amount=7498.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Chest X-Ray", amount=592.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="ECG", amount=318.0, category="Investigations", quantity=1),
+                ExtractedBillingItem(description="Colonoscopy with Biopsy", amount=6082.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="Chemotherapy (Capecitabine + Irinotecan Cycle)", amount=23594.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="PEG-GCSF Administration", amount=6196.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="ICU Monitoring", amount=2914.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="IV Fluid & Electrolyte Management", amount=935.0, category="Surgical / Procedures", quantity=1),
+                ExtractedBillingItem(description="Capecitabine + Irinotecan (course)", amount=15088.0, category="Pharmacy / Medications", quantity=1),
+                ExtractedBillingItem(description="Anti-emetics & Supportive Medications", amount=791.0, category="Pharmacy / Medications", quantity=1),
+                ExtractedBillingItem(description="IV Fluids & Consumables", amount=1215.0, category="Pharmacy / Medications", quantity=1),
+            ],
+        )
+
+        policy = ExtractedInsurancePolicy(
+            policy_number="1739112612362282",
+            scheme_or_insurer="Star Health and Allied Insurance",
+            annual_sum_insured=10000000.0,
+            copayment_percentage=0.0,
+            deductible_amount=5000.0,
+            room_rent_sublimit=500.0,
+            coverage_type="Indemnity Health Insurance",
+            covered_categories=["In-patient Treatment", "Day care Treatment", "Pre-Hospitalization", "Post-Hospitalization"],
+            excluded_categories=[
+                "Investigation & Evaluation", "Rest Cure", "Cosmetic Surgery",
+                "Oral chemotherapy drugs including Capecitabine, Irinotecan, and all targeted therapy agents / biologic agents"
+            ],
+            terms_and_rules="NIL co-payment. INR 5,000 deductible per claim. Room rent is subject to a sub-limit of INR 500 per day for General Ward and INR 2,000 per day for ICU/ICCU. Oral chemotherapy drugs and targeted therapy agents are not covered.",
+        )
+
+        adj = _adjudicate_bill_against_policy([bill], policy)
+        self.assertEqual(adj["total_billed"], 77832.0)
+        # Excluded capecitabine items: 23594 + 15088 = 38682
+        # Room excess: (820 - 500) + (3312 - 2000) = 320 + 1312 = 1632
+        # Deductible: 5000
+        # Insured = 77832 - 38682 - 1632 - 5000 = 32518.0 (41.8%)
+        self.assertEqual(adj["insured_amount"], 32518.0)
+        self.assertEqual(adj["patient_payable"], 45314.0)
+        self.assertEqual(adj["coverage_percentage"], 41.8)
+        self.assertEqual(adj["status"], "Partially Covered (41.8%)")
+
 
 if __name__ == "__main__":
     unittest.main()
+

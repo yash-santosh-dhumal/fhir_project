@@ -158,17 +158,6 @@
           </div>
         </header>
 
-        <section class="flow" aria-label="Toolkit flow">
-          <span>Patient ZIP / PDF</span>
-          <span>AI Document Understanding</span>
-          <span>Medical &amp; Bill Extraction</span>
-          <span>LOINC Mapping</span>
-          <span>ABDM FHIR Bundle</span>
-          <span>Automated Insurance Adjudication</span>
-        </section>
-
-        <p class="disclaimer">Educational technical demonstration. Extracted medical data must not be used for diagnosis or clinical decision-making without appropriate validation.</p>
-
         <!-- Tab navigation -->
         <nav class="tab-nav" id="tabNav">
           <button class="tab-btn active" data-tab="upload" id="tabBtnUpload">Upload &amp; Convert</button>
@@ -241,6 +230,18 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <!-- Live Human-Readable Processing Logs Container -->
+            <div id="pipelineLogFeed" class="pipeline-log-box" hidden>
+              <div class="pipeline-log-header">
+                <span class="pipeline-log-title">
+                  <span class="pipeline-log-spinner" id="pipelineLogSpinner"></span>
+                  <span id="pipelineLogTitleText">Processing Pipeline Logs</span>
+                </span>
+                <span id="pipelineLogElapsed" class="pipeline-log-elapsed">0.0s elapsed</span>
+              </div>
+              <div id="pipelineLogList" class="pipeline-log-list" role="log" aria-live="polite"></div>
             </div>
           </article>
 
@@ -364,46 +365,7 @@
             </div>
           </section>
 
-          <!-- Quick summary row -->
-          <section class="grid" id="summaryGrid">
-            <article class="card">
-              <h2>FHIR Resource Summary</h2>
-              <div id="bundleSummary" class="summary-list">No FHIR Bundle loaded.</div>
-              <h3>FHIR Profiles</h3>
-              <ul id="profileList" class="profiles"><li>Not available</li></ul>
-            </article>
 
-            <article class="card">
-              <h2 id="extractedDataTitle">Extracted Clinical Data</h2>
-              <div class="patient">
-                <div><strong>Patient</strong><span id="patientName">Not available</span></div>
-                <div><strong>Gender</strong><span id="patientGender">Not available</span></div>
-                <div><strong>Birth Date</strong><span id="patientBirthDate">Not available</span></div>
-                <div><strong>Aadhaar / UID</strong><span id="patientAadhaar">Not available</span></div>
-                <div><strong>ABHA / Scheme</strong><span id="patientAbha">Not available</span></div>
-                <div><strong>Guardian / Father</strong><span id="patientGuardian">Not available</span></div>
-                <div><strong>Mobile / Phone</strong><span id="patientPhone">Not available</span></div>
-                <div><strong>Hospital IP / MRN</strong><span id="patientHospId">Not available</span></div>
-                <div><strong>Address</strong><span id="patientAddress">Not available</span></div>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Test</th>
-                      <th>LOINC</th>
-                      <th>Result</th>
-                      <th>Unit</th>
-                      <th>Reference Range</th>
-                    </tr>
-                  </thead>
-                  <tbody id="observationsBody">
-                    <tr><td colspan="5">No observations loaded.</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
 
           <!-- FHIR Format (Raw JSON) with Collapsible Dropdown -->
           <section class="card raw-card" id="rawJsonSection">
@@ -429,7 +391,7 @@
 
         <!-- ═══ TAB: Patient Records ═══ -->
         <div class="tab-panel" id="tab-patients">
-          <section class="card">
+          <section class="card" id="patientsListCard">
             <div class="section-header">
               <h2 id="patientsSectionTitle">Patient Records</h2>
               <div style="display:flex;gap:10px;align-items:center">
@@ -446,7 +408,7 @@
             <div class="section-header" style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px">
               <h2 id="patientDetailName">Clinical Diagnostic Report (HL7® FHIR® R4)</h2>
               <div style="display:flex;gap:8px">
-                <button id="printReportBtn" class="secondary small" type="button" onclick="window.print()">Print / Export PDF</button>
+                <button id="printReportHeaderBtn" class="secondary small print-report-btn" type="button" onclick="printPatientReport()">Print / Export PDF</button>
                 <button id="closePatientDetailBtn" class="secondary small" type="button">Close Report</button>
               </div>
             </div>

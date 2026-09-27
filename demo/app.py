@@ -609,14 +609,20 @@ def _adjudicate_patient_with_policy(
 
     bill_items = []
     for item in target_claim.get("item", []):
-        cat = item.get("category", {}).get("coding", [{}])[0].get("display", "General")
+        cat_obj = item.get("category") or {}
+        cat = cat_obj.get("text") or (cat_obj.get("coding") or [{}])[0].get("display") or "General"
         desc = item.get("productOrService", {}).get("text", "")
-        amt = item.get("unitPrice", {}).get("value", 0.0)
+        net_val = item.get("net", {}).get("value")
+        qty = int(item.get("quantity", {}).get("value", 1) or 1)
+        unit_val = float(item.get("unitPrice", {}).get("value", 0.0) or 0.0)
+        amt = float(net_val) if net_val is not None and float(net_val) > 0 else (unit_val * qty)
         if amt > 0:
             bill_items.append(ExtractedBillingItem(
                 description=desc,
                 amount=float(amt),
                 category=cat,
+                quantity=qty,
+                unit_price=unit_val,
             ))
 
     bill_data = [
