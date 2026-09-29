@@ -187,14 +187,14 @@ def _prepare_document_part(file_bytes: bytes, mime_type: str, filename: str) -> 
             with PIL.Image.open(io.BytesIO(file_bytes)) as img:
                 w, h = img.size
                 max_dim = max(w, h)
-                if max_dim > 1600 or len(file_bytes) > 400 * 1024 or img.format != "JPEG":
-                    if max_dim > 1600:
-                        scale = 1600.0 / max_dim
+                if max_dim > 1200 or len(file_bytes) > 250 * 1024 or img.format != "JPEG":
+                    if max_dim > 1200:
+                        scale = 1200.0 / max_dim
                         img = img.resize((int(w * scale), int(h * scale)), PIL.Image.Resampling.LANCZOS)
                     if img.mode != "RGB":
                         img = img.convert("RGB")
                     buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=85, optimize=True)
+                    img.save(buf, format="JPEG", quality=75, optimize=True)
                     file_bytes = buf.getvalue()
                     mime_type = "image/jpeg"
                 return types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
@@ -722,6 +722,8 @@ def process_archive_documents_with_gemini(
                 results[idx] = res
                 log.info("  ✓ Batch %d/%d completed (%d documents processed)",
                          idx + 1, len(batches), len(batches[idx]))
+                import gc
+                gc.collect()
             except Exception as exc:
                 log.error("Batch %d failed with error: %s", idx + 1, exc)
                 results[idx] = {}
