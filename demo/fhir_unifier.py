@@ -44,6 +44,25 @@ ABDM_CLAIM_RESPONSE_PROFILE = (
     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClaimResponse"
 )
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    """Safely converts any value (string with commas, currency symbols, None, empty string) to float."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        val_clean = re.sub(r"[^\d.-]", "", val).strip()
+        if not val_clean or val_clean in ("-", ".", "-.", ".-"):
+            return default
+        try:
+            return float(val_clean)
+        except (ValueError, TypeError):
+            return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 _LOINC_CACHE: dict[str, tuple[str, str]] | None = None
 _LOINC_DB_CONN: Any | None = None
 
@@ -702,8 +721,8 @@ def _build_claim_resource(
     for seq, item in enumerate(items_list, 1):
         desc = item.get("description", "Charge")
         qty = item.get("quantity", 1) or 1
-        unit_price = float(item.get("unit_price", 0) or 0)
-        amount = float(item.get("amount", 0) or 0)
+        unit_price = _safe_float(item.get("unit_price", 0))
+        amount = _safe_float(item.get("amount", 0))
         category = item.get("category", "General")
 
         fhir_item: dict[str, Any] = {
@@ -726,7 +745,7 @@ def _build_claim_resource(
         }
         fhir_items.append(fhir_item)
 
-    total_amount = float(b.get("total_amount", 0) or 0)
+    total_amount = _safe_float(b.get("total_amount", 0))
     bill_number = b.get("bill_number", "") or ""
     bill_date = b.get("bill_date", "") or ""
     payment_mode = b.get("payment_mode", "") or ""
@@ -803,9 +822,9 @@ def _build_coverage_resource(
     scheme_name = getattr(policy, "scheme_or_insurer", "") or "Health Insurance Scheme"
     policy_num = getattr(policy, "policy_number", "") or getattr(policy, "health_card_number", "") or "N/A"
     cov_type = getattr(policy, "coverage_type", "") or "Cashless Health Insurance"
-    sum_ins = float(getattr(policy, "annual_sum_insured", 0.0) or 0.0)
-    copay = float(getattr(policy, "copayment_liability", 0.0) or 0.0)
-    copay_pct = float(getattr(policy, "copayment_percentage", 0.0) or 0.0)
+    sum_ins = _safe_float(getattr(policy, "annual_sum_insured", 0.0))
+    copay = _safe_float(getattr(policy, "copayment_liability", 0.0))
+    copay_pct = _safe_float(getattr(policy, "copayment_percentage", 0.0))
     covered_cats = getattr(policy, "covered_categories", []) or []
     terms = getattr(policy, "terms_and_rules", "") or ""
 
@@ -946,22 +965,22 @@ def _adjudicate_bill_against_policy(
     for b in target_bills:
         items = getattr(b, "items", []) or []
         all_bill_items.extend(items)
-        amt = float(getattr(b, "total_amount", 0.0) or 0.0)
-        items_sum = sum(float(getattr(it, "amount", 0.0) or 0.0) for it in items)
+        amt = _safe_float(getattr(b, "total_amount", 0.0))
+        items_sum = sum(_safe_float(getattr(it, "amount", 0.0)) for it in items)
         if items_sum > 0:
             total_billed += items_sum
         elif amt > 0:
             total_billed += amt
         for it in items:
             cat = (getattr(it, "category", "") or "General").strip()
-            item_amt = float(getattr(it, "amount", 0.0) or 0.0)
+            item_amt = _safe_float(getattr(it, "amount", 0.0))
             bill_items_by_category[cat] = bill_items_by_category.get(cat, 0.0) + item_amt
 
-    pre_auth_appr = float(getattr(policy, "pre_auth_approved_amount", 0.0) or 0.0)
-    policy_patient_oop = float(getattr(policy, "patient_out_of_pocket", 0.0) or 0.0)
-    copay_liab = float(getattr(policy, "copayment_liability", 0.0) or 0.0)
-    copay_pct = float(getattr(policy, "copayment_percentage", 0.0) or 0.0)
-    sum_insured = float(getattr(policy, "annual_sum_insured", 0.0) or 0.0)
+    pre_auth_appr = _safe_float(getattr(policy, "pre_auth_approved_amount", 0.0))
+    policy_patient_oop = _safe_float(getattr(policy, "patient_out_of_pocket", 0.0))
+    copay_liab = _safe_float(getattr(policy, "copayment_liability", 0.0))
+    copay_pct = _safe_float(getattr(policy, "copayment_percentage", 0.0))
+    sum_insured = _safe_float(getattr(policy, "annual_sum_insured", 0.0))
     cov_type = (getattr(policy, "coverage_type", "") or "").lower()
     terms_text = (getattr(policy, "terms_and_rules", "") or "").lower()
     scheme = getattr(policy, "scheme_or_insurer", "") or "Insurance Policy"
@@ -969,15 +988,15 @@ def _adjudicate_bill_against_policy(
     preauth_num = getattr(policy, "claim_or_preauth_number", "") or ""
     covered_categories = getattr(policy, "covered_categories", []) or []
     excluded_categories = getattr(policy, "excluded_categories", []) or []
-    deductible_amount = float(getattr(policy, "deductible_amount", 0.0) or 0.0)
-    room_rent_sublimit = float(getattr(policy, "room_rent_sublimit", 0.0) or 0.0)
+    deductible_amount = _safe_float(getattr(policy, "deductible_amount", 0.0))
+    room_rent_sublimit = _safe_float(getattr(policy, "room_rent_sublimit", 0.0))
 
     # Also try to extract deductible from terms text if not set via field
     import re
     if deductible_amount == 0.0 and terms_text:
         ded_match = re.search(r'deductible[:\s]*(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)', terms_text)
         if ded_match:
-            deductible_amount = float(ded_match.group(1).replace(',', ''))
+            deductible_amount = _safe_float(ded_match.group(1))
 
     # Detect ICU sub-limit from terms text if present
     icu_sublimit = 0.0
@@ -992,7 +1011,7 @@ def _adjudicate_bill_against_policy(
         for pat in icu_patterns:
             m = re.search(pat, terms_text)
             if m:
-                candidate = float(m.group(1).replace(',', ''))
+                candidate = _safe_float(m.group(1))
                 # Sanity check: ICU sublimit is typically 1000-10000, not a sum insured or deductible
                 if 100 <= candidate <= 50000:
                     icu_sublimit = candidate
@@ -1016,13 +1035,13 @@ def _adjudicate_bill_against_policy(
         for text in (terms_text, cov_type):
             m = re.search(r'(\d{2,3})\s*[:%]\s*(?:insurer|coverage|covered|cashless)', text)
             if m:
-                coverage_split_pct = float(m.group(1))
+                coverage_split_pct = _safe_float(m.group(1))
                 copay_pct = 100.0 - coverage_split_pct
                 break
             m2 = re.search(r'(\d{2})\s*:\s*(\d{2})', text)
             if m2:
-                coverage_split_pct = float(m2.group(1))
-                copay_pct = float(m2.group(2))
+                coverage_split_pct = _safe_float(m2.group(1))
+                copay_pct = _safe_float(m2.group(2))
                 break
 
     has_copay_rule = coverage_split_pct > 0 and copay_pct > 0
@@ -1382,9 +1401,9 @@ def _build_claim_response_resource(
 ) -> dict[str, Any]:
     """Constructs a normative FHIR R4 ClaimResponse resource representing adjudication results."""
     cr_id = str(uuid.uuid4())
-    total_billed = float(adjudication.get("total_billed", 0.0) or 0.0)
-    insured_amount = float(adjudication.get("insured_amount", 0.0) or 0.0)
-    patient_payable = float(adjudication.get("patient_payable", 0.0) or 0.0)
+    total_billed = _safe_float(adjudication.get("total_billed", 0.0))
+    insured_amount = _safe_float(adjudication.get("insured_amount", 0.0))
+    patient_payable = _safe_float(adjudication.get("patient_payable", 0.0))
     notes = adjudication.get("notes", "")
 
     claim_response: dict[str, Any] = {
