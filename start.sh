@@ -24,6 +24,11 @@ elif [ -f "src/config.yaml" ]; then
   export TOOLKIT_CONFIG_FILE="src/config.yaml"
 fi
 
+# Memory optimizations for constrained environments (e.g. Render 512 MB Free Tier)
+export GEMINI_OCR_MAX_WORKERS="${GEMINI_OCR_MAX_WORKERS:-2}"
+export GEMINI_OCR_BATCH_SIZE="${GEMINI_OCR_BATCH_SIZE:-3}"
+export TOOLKIT_CONCURRENT_WORKERS="${TOOLKIT_CONCURRENT_WORKERS:-1}"
+
 echo "======================================================================"
 echo " Starting Medical Data Toolkit & FHIR Portal"
 echo "======================================================================"
