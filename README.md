@@ -1,3 +1,13 @@
+---
+title: Medical Data Toolkit FHIR Portal
+emoji: 🏥
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 <!-- 
 
 .\.venv-toolkit\Scripts\python.exe scripts\run_toolkit_dev_server.py
