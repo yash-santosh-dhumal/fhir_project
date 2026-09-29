@@ -982,11 +982,24 @@ def _adjudicate_bill_against_policy(
     # Detect ICU sub-limit from terms text if present
     icu_sublimit = 0.0
     if terms_text:
-        icu_match = re.search(r'icu[^\d]*(\d[\d,]+)', terms_text)
-        if icu_match:
-            icu_sublimit = float(icu_match.group(1).replace(',', ''))
+        # Look for explicit ICU daily rate patterns like "INR 2,000 per day for ICU"
+        # or "ICU/ICCU ... INR 2000" but avoid picking up deductible amounts
+        icu_patterns = [
+            r'(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*day|/\s*day|daily)?\s*(?:for\s*)?(?:icu|iccu)',
+            r'icu[/\s]*(?:iccu)?[^.]*?(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*day|/\s*day|daily)',
+            r'(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*day|/\s*day|daily)\s*(?:for\s*)?(?:icu|iccu)',
+        ]
+        for pat in icu_patterns:
+            m = re.search(pat, terms_text)
+            if m:
+                candidate = float(m.group(1).replace(',', ''))
+                # Sanity check: ICU sublimit is typically 1000-10000, not a sum insured or deductible
+                if 100 <= candidate <= 50000:
+                    icu_sublimit = candidate
+                    break
     if icu_sublimit == 0.0 and room_rent_sublimit > 0:
         icu_sublimit = room_rent_sublimit * 4.0  # standard industry ratio (e.g. 500 ward -> 2000 ICU)
+
 
     # Normalize copay_liab: if it looks like a ratio/percentage (< 100) rather than
     # an actual rupee amount, treat it as 0 and rely on copay_pct instead
@@ -1025,37 +1038,89 @@ def _adjudicate_bill_against_policy(
         "therapy", "therapies", "agents", "drugs", "cycle", "course", "person", "insured"
     }
 
+    # Categories that represent drug/pharmacy costs (not procedure administration charges)
+    PHARMACY_CATEGORIES = {
+        "pharmacy", "medications", "medication", "drugs", "drug", "medicine",
+        "pharmacy / medications", "pharmacy/medications", "consumables",
+    }
+
+    # Categories that represent procedure/surgical/administration charges
+    PROCEDURE_CATEGORIES = {
+        "surgical", "surgery", "procedure", "procedures", "surgical / procedures",
+        "surgical/procedures", "administration", "day care", "operation",
+    }
+
+    # Determine if the exclusion clause is about drugs/pharmacy vs general clinical exclusion
+    def _is_drug_exclusion(exclusion_text: str) -> bool:
+        """Detect if an exclusion clause is specifically about drugs/medications."""
+        drug_signals = {"drug", "drugs", "oral", "medication", "medications", "tablet",
+                        "capsule", "biologic", "agent", "agents", "pharmaceutical"}
+        words = set(re.split(r'[\s/&,()]+', exclusion_text.lower()))
+        return bool(words & drug_signals)
+
     # Extract actionable specific clinical terms from exclusion clauses
-    specific_exclusion_targets: list[tuple[str, list[str]]] = []
+    specific_exclusion_targets: list[tuple[str, list[str], bool]] = []
     for ec in excluded_categories:
         ec_clean = ec.strip().lower()
+        is_drug_excl = _is_drug_exclusion(ec_clean)
         parts = re.split(r'[,;:]|\band\b|\bor\b|\bincluding\b', ec_clean)
         for part in parts:
             p = part.strip()
             meaningful_words = [w for w in re.split(r'[\s/&,()]+', p) if len(w) > 3 and w not in GENERIC_EXCLUSION_WORDS]
             if meaningful_words:
                 target_phrase = " ".join(meaningful_words)
-                specific_exclusion_targets.append((target_phrase, meaningful_words))
+                specific_exclusion_targets.append((target_phrase, meaningful_words, is_drug_excl))
+
+    # Track rejection reasons for the report
+    rejection_reasons: list[dict[str, Any]] = []
 
     excluded_amount = 0.0
     if specific_exclusion_targets and all_bill_items:
         for it in all_bill_items:
             desc_lower = (getattr(it, "description", "") or "").lower()
+            cat_lower = (getattr(it, "category", "") or "").lower()
             amt = float(getattr(it, "amount", 0.0) or 0.0)
             
+            # Determine if this bill item is a pharmacy/drug item or a procedure item
+            cat_words = set(w.lower() for w in re.split(r'[\s/&,]+', cat_lower) if w)
+            is_pharmacy_item = bool(cat_words & PHARMACY_CATEGORIES)
+            is_procedure_item = bool(cat_words & PROCEDURE_CATEGORIES)
+
             is_item_excluded = False
-            for target_phrase, words in specific_exclusion_targets:
+            exclusion_reason = ""
+            for target_phrase, words, is_drug_excl in specific_exclusion_targets:
+                # For drug exclusions: only match against pharmacy/medication items,
+                # NOT against surgical procedure / administration charge items.
+                # The drug cost (₹15,088 for Capecitabine) is excluded,
+                # but the chemotherapy administration fee (₹23,594) is covered.
+                if is_drug_excl and is_procedure_item and not is_pharmacy_item:
+                    continue
+
+                matched = False
                 if len(target_phrase) > 4 and target_phrase in desc_lower:
+                    matched = True
+                else:
+                    for w in words:
+                        if len(w) >= 5 and w in desc_lower:
+                            matched = True
+                            break
+                
+                if matched:
                     is_item_excluded = True
+                    exclusion_reason = (
+                        f"Policy Exclusion Clause: '{target_phrase}' is specifically excluded from coverage in the insurance policy document. "
+                        f"— Patient Liability: Patient must bear non-formulary and excluded medication/procedure costs out-of-pocket at hospital discharge."
+                    )
                     break
-                for w in words:
-                    if len(w) >= 5 and w in desc_lower:
-                        is_item_excluded = True
-                        break
-                if is_item_excluded:
-                    break
+
             if is_item_excluded:
                 excluded_amount += amt
+                rejection_reasons.append({
+                    "item": getattr(it, "description", ""),
+                    "amount": amt,
+                    "reason": exclusion_reason,
+                    "type": "exclusion",
+                })
 
     # ── Room rent sub-limit: calculate excess room charges from bill items ──
     room_rent_excess = 0.0
@@ -1069,11 +1134,33 @@ def _adjudicate_bill_against_policy(
                 if icu_sublimit > 0 and "monitoring" not in desc_lower:
                     max_allowed = icu_sublimit * qty
                     if amt > max_allowed:
-                        room_rent_excess += round(amt - max_allowed, 2)
+                        excess = round(amt - max_allowed, 2)
+                        room_rent_excess += excess
+                        rejection_reasons.append({
+                            "item": getattr(it, "description", ""),
+                            "amount": excess,
+                            "reason": (
+                                f"Policy Room Sub-limit Clause: Policy document caps ICU accommodation tariff at INR {icu_sublimit:,.0f}/day "
+                                f"(billed INR {amt:,.0f} for {qty} day(s), allowed INR {max_allowed:,.0f}). Excess INR {excess:,.0f} is rejected from insurance coverage. "
+                                f"— Patient Liability: Room rent charged above the policy daily sub-limit is excluded from insurer liability and payable by the patient."
+                            ),
+                            "type": "room_sublimit",
+                        })
             elif room_rent_sublimit > 0 and ("ward" in desc_lower or "room" in desc_lower or "bed" in desc_lower or "room & board" in cat_lower):
                 max_allowed = room_rent_sublimit * qty
                 if amt > max_allowed:
-                    room_rent_excess += round(amt - max_allowed, 2)
+                    excess = round(amt - max_allowed, 2)
+                    room_rent_excess += excess
+                    rejection_reasons.append({
+                        "item": getattr(it, "description", ""),
+                        "amount": excess,
+                        "reason": (
+                            f"Policy Room Sub-limit Clause: Policy document caps General Ward room rent at INR {room_rent_sublimit:,.0f}/day "
+                            f"(billed INR {amt:,.0f} for {qty} day(s), allowed INR {max_allowed:,.0f}). Excess INR {excess:,.0f} is rejected from insurance coverage. "
+                            f"— Patient Liability: Room rent charged above the policy daily sub-limit is excluded from insurer liability and payable by the patient."
+                        ),
+                        "type": "room_sublimit",
+                    })
 
     # ── Determine the eligible (covered) amount from the bill by matching categories ──
     eligible_amount = total_billed  # default: entire bill is eligible
@@ -1154,9 +1241,33 @@ def _adjudicate_bill_against_policy(
     if deductible_amount > 0:
         deductible_applied = min(deductible_amount, eligible_amount)
         eligible_amount = round(max(0.0, eligible_amount - deductible_applied), 2)
+        if deductible_applied > 0:
+            rejection_reasons.append({
+                "item": "Mandatory Policy Deductible",
+                "amount": deductible_applied,
+                "reason": (
+                    f"Policy Deductible Clause: Insurance policy document specifies a mandatory deductible of INR {deductible_amount:,.0f} per hospitalization. "
+                    f"The first INR {deductible_applied:,.0f} of admissible expenses is deducted from claim payout. "
+                    f"— Patient Liability: Mandatory policy deductible threshold must be paid out-of-pocket by the patient before insurance benefits apply."
+                ),
+                "type": "deductible",
+            })
 
     # Cap eligible amount by sum insured
-    if sum_insured > 0:
+    if sum_insured > 0 and eligible_amount > sum_insured:
+        sum_insured_excess = round(eligible_amount - sum_insured, 2)
+        eligible_amount = sum_insured
+        rejection_reasons.append({
+            "item": "Annual Sum Insured Limit Exceeded",
+            "amount": sum_insured_excess,
+            "reason": (
+                f"Policy Sum Insured Ceiling: Total admissible hospital claim exceeds the annual sum insured maximum cap of INR {sum_insured:,.2f} stated in the policy document. "
+                f"Excess charges of INR {sum_insured_excess:,.2f} are rejected from insurance coverage. "
+                f"— Patient Liability: Invoiced medical expenses beyond the policy annual limit are the responsibility of the patient."
+            ),
+            "type": "sum_insured_limit",
+        })
+    elif sum_insured > 0:
         eligible_amount = min(eligible_amount, sum_insured)
 
     # Adjudication calculation
@@ -1186,6 +1297,18 @@ def _adjudicate_bill_against_policy(
         else:
             # Calculate from percentage: patient pays the copay share of eligible amount
             patient_payable = round(eligible_amount - insured_amount, 2)
+            if patient_payable > 0:
+                copay_pct_val = round(100.0 - coverage_split_pct, 1)
+                rejection_reasons.append({
+                    "item": f"Policy Co-Payment ({copay_pct_val:.0f}% Co-Pay Liability)",
+                    "amount": patient_payable,
+                    "reason": (
+                        f"Policy Co-Payment Clause: Insurance policy document establishes a {coverage_split_pct:.0f}:{copay_pct_val:.0f} risk-sharing schedule under {scheme}. "
+                        f"Insurer coverage is limited to {coverage_split_pct:.0f}% of eligible expenses (INR {insured_amount:,.2f}); remaining {copay_pct_val:.0f}% is excluded from insurer liability. "
+                        f"— Patient Liability: Beneficiary is contractually required to pay {copay_pct_val:.0f}% cost-sharing liability (INR {patient_payable:,.2f}) at hospital discharge."
+                    ),
+                    "type": "copay",
+                })
         # Add any non-coverable amount (excluded items, deductible, room excess) to patient payable
         patient_payable = round(patient_payable + non_coverable, 2)
     elif pre_auth_appr > 0:
@@ -1198,6 +1321,17 @@ def _adjudicate_bill_against_policy(
         copay_amt = round(eligible_amount * (copay_pct / 100.0), 2)
         insured_amount = round(eligible_amount - copay_amt, 2)
         patient_payable = round(copay_amt + non_coverable, 2)
+        if copay_amt > 0:
+            rejection_reasons.append({
+                "item": f"Policy Co-Payment ({copay_pct:.0f}% Co-Pay Liability)",
+                "amount": copay_amt,
+                "reason": (
+                    f"Policy Co-Payment Clause: Insurance policy document mandates a {copay_pct:.0f}% beneficiary co-payment on admissible hospital charges. "
+                    f"Insurer liability excludes INR {copay_amt:,.2f}. "
+                    f"— Patient Liability: Beneficiary is contractually required to pay {copay_pct:.0f}% co-payment (INR {copay_amt:,.2f}) out-of-pocket."
+                ),
+                "type": "copay",
+            })
     elif copay_liab > 100:
         patient_payable = min(eligible_amount, copay_liab) + non_coverable
         insured_amount = round(total_billed - patient_payable, 2)
@@ -1234,7 +1368,9 @@ def _adjudicate_bill_against_policy(
         "policy_number": policy_num,
         "claim_or_preauth_number": preauth_num,
         "annual_sum_insured": sum_insured,
+        "rejection_reasons": rejection_reasons,
     }
+
 
 
 def _build_claim_response_resource(
@@ -1335,6 +1471,19 @@ def _build_claim_response_resource(
     pre_auth_ref = adjudication.get("claim_or_preauth_number")
     if pre_auth_ref:
         claim_response["preAuthRef"] = pre_auth_ref
+
+    # Add rejection reasons as processNote entries
+    rejection_reasons = adjudication.get("rejection_reasons", []) or []
+    if rejection_reasons:
+        process_notes = []
+        for idx, rr in enumerate(rejection_reasons, 1):
+            note_text = f"{rr.get('item', '')}: INR {rr.get('amount', 0):,.2f} — {rr.get('reason', '')}"
+            process_notes.append({
+                "number": idx,
+                "type": "display",
+                "text": note_text,
+            })
+        claim_response["processNote"] = process_notes
 
     return claim_response
 

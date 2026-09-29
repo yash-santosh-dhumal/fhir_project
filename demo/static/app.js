@@ -226,11 +226,20 @@ function applyPortalAuth(auth) {
 
   // Auto-switch to Patient Records tab for Insurance portal to immediately display hospital dossiers
   if (portalMode === "insurance") {
+    $$(".tab-btn").forEach((b) => b.classList.remove("active"));
+    $$(".tab-panel").forEach((p) => p.classList.remove("active"));
     const tabPatients = $("#tabBtnPatients");
-    if (tabPatients) tabPatients.click();
+    if (tabPatients) tabPatients.classList.add("active");
+    const panel = $("#tab-patients");
+    if (panel) panel.classList.add("active");
+    loadPatients();
   } else {
+    $$(".tab-btn").forEach((b) => b.classList.remove("active"));
+    $$(".tab-panel").forEach((p) => p.classList.remove("active"));
     const tabUpload = $("#tabBtnUpload");
-    if (tabUpload) tabUpload.click();
+    if (tabUpload) tabUpload.classList.add("active");
+    const panel = $("#tab-upload");
+    if (panel) panel.classList.add("active");
   }
 }
 
@@ -1603,6 +1612,36 @@ function printPatientReport() {
 }
 window.printPatientReport = printPatientReport;
 
+function toggleReportSection(headerEl) {
+  const section = headerEl.closest(".report-collapsible-section");
+  if (!section) return;
+  const isOpen = section.classList.toggle("open");
+  headerEl.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+window.toggleReportSection = toggleReportSection;
+
+function handleReportSectionKeydown(event, headerEl) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    toggleReportSection(headerEl);
+  }
+}
+window.handleReportSectionKeydown = handleReportSectionKeydown;
+
+function toggleAllReportSections(expand) {
+  document.querySelectorAll(".report-collapsible-section").forEach((sec) => {
+    const h = sec.querySelector(".report-collapsible-header");
+    if (expand) {
+      sec.classList.add("open");
+      if (h) h.setAttribute("aria-expanded", "true");
+    } else {
+      sec.classList.remove("open");
+      if (h) h.setAttribute("aria-expanded", "false");
+    }
+  });
+}
+window.toggleAllReportSections = toggleAllReportSections;
+
 async function viewPatient(patientId) {
   const detail = $("#patientDetail");
   const content = $("#patientDetailContent");
@@ -2009,8 +2048,8 @@ async function viewPatient(patientId) {
         });
 
         clinicalSectionHtml = `
-          <div class="report-clinical-section">
-            <div class="clinical-section-header">
+          <div class="report-clinical-section report-collapsible-section" id="sectionClinical" style="margin-top:14px">
+            <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
               <div class="clinical-section-title-wrap">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/>
@@ -2019,70 +2058,92 @@ async function viewPatient(patientId) {
                 </svg>
                 <h4>Clinical Diagnoses, History &amp; Treatment Regimen</h4>
               </div>
-              <span class="manifest-badge" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">Physician Validated</span>
-            </div>
-
-            <div class="clinical-grid">
-              <!-- Diagnoses Card -->
-              <div class="clinical-cat-card diagnoses">
-                <div class="clinical-cat-header">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                  <span>Primary &amp; Clinical Diagnoses</span>
-                </div>
-                <ul class="clinical-list">
-                  ${(diagnoses.length ? diagnoses : ["No specific primary diagnoses recorded"]).map((d) => `<li>${escapeHtml(d)}</li>`).join("")}
-                </ul>
-              </div>
-
-              <!-- Treatment & Medications Card -->
-              <div class="clinical-cat-card medications">
-                <div class="clinical-cat-header">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>
-                  <span>Treatment Protocol &amp; Medications</span>
-                </div>
-                <ul class="clinical-list">
-                  ${(medications.length ? medications : ["No specific active medications recorded"]).map((m) => `<li>${escapeHtml(m)}</li>`).join("")}
-                </ul>
-              </div>
-
-              <!-- Anatomical & Clinical Findings Card -->
-              <div class="clinical-cat-card findings">
-                <div class="clinical-cat-header">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                  <span>Clinical Observations &amp; History</span>
-                </div>
-                <ul class="clinical-list">
-                  ${(findings.length ? findings : ["Patient undergoing scheduled clinical management"]).map((f) => `<li>${escapeHtml(f)}</li>`).join("")}
-                </ul>
-              </div>
-
-              <!-- Follow-up & Care Plan Card -->
-              <div class="clinical-cat-card followup">
-                <div class="clinical-cat-header">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                  <span>Follow-up &amp; Review Schedule</span>
-                </div>
-                <ul class="clinical-list">
-                  ${(followup.length ? followup : ["Routine follow-up as advised by consultant"]).map((u) => `<li>${escapeHtml(u)}</li>`).join("")}
-                </ul>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="manifest-badge" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">Physician Validated</span>
+                <span class="report-collapsible-chevron" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
               </div>
             </div>
 
-            ${diagReport.conclusion && diagReport.conclusion !== "NA" ? `
-              <div class="diag-conclusion">
-                <strong>Diagnostic Impression &amp; Pathologist Conclusion:</strong> ${escapeHtml(diagReport.conclusion)}
+            <div class="report-collapsible-body">
+              <div class="clinical-grid">
+                <!-- Diagnoses Card -->
+                <div class="clinical-cat-card diagnoses">
+                  <div class="clinical-cat-header">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>Primary &amp; Clinical Diagnoses</span>
+                  </div>
+                  <ul class="clinical-list">
+                    ${(diagnoses.length ? diagnoses : ["No specific primary diagnoses recorded"]).map((d) => `<li>${escapeHtml(d)}</li>`).join("")}
+                  </ul>
+                </div>
+
+                <!-- Treatment & Medications Card -->
+                <div class="clinical-cat-card medications">
+                  <div class="clinical-cat-header">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>
+                    <span>Treatment Protocol &amp; Medications</span>
+                  </div>
+                  <ul class="clinical-list">
+                    ${(medications.length ? medications : ["No specific active medications recorded"]).map((m) => `<li>${escapeHtml(m)}</li>`).join("")}
+                  </ul>
+                </div>
+
+                <!-- Anatomical & Clinical Findings Card -->
+                <div class="clinical-cat-card findings">
+                  <div class="clinical-cat-header">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    <span>Clinical Observations &amp; History</span>
+                  </div>
+                  <ul class="clinical-list">
+                    ${(findings.length ? findings : ["Patient undergoing scheduled clinical management"]).map((f) => `<li>${escapeHtml(f)}</li>`).join("")}
+                  </ul>
+                </div>
+
+                <!-- Follow-up & Care Plan Card -->
+                <div class="clinical-cat-card followup">
+                  <div class="clinical-cat-header">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    <span>Follow-up &amp; Review Schedule</span>
+                  </div>
+                  <ul class="clinical-list">
+                    ${(followup.length ? followup : ["Routine follow-up as advised by consultant"]).map((u) => `<li>${escapeHtml(u)}</li>`).join("")}
+                  </ul>
+                </div>
               </div>
-            ` : ""}
+
+              ${diagReport.conclusion && diagReport.conclusion !== "NA" ? `
+                <div class="diag-conclusion" style="margin-top:14px">
+                  <strong>Diagnostic Impression &amp; Pathologist Conclusion:</strong> ${escapeHtml(diagReport.conclusion)}
+                </div>
+              ` : ""}
+            </div>
           </div>
         `;
       } else if (diagReport.conclusion && diagReport.conclusion !== "NA") {
         clinicalSectionHtml = `
-          <div class="report-clinical-section">
-            <div class="clinical-section-header">
-              <h4>Diagnostic Impression &amp; Pathologist Conclusion</h4>
+          <div class="report-clinical-section report-collapsible-section" id="sectionClinical" style="margin-top:14px">
+            <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
+              <div class="clinical-section-title-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/>
+                  <path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/>
+                  <circle cx="20" cy="10" r="2"/>
+                </svg>
+                <h4>Clinical Diagnoses, History &amp; Treatment Regimen</h4>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="manifest-badge" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">Physician Validated</span>
+                <span class="report-collapsible-chevron" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
+              </div>
             </div>
-            <div class="diag-conclusion">
-              ${escapeHtml(diagReport.conclusion)}
+            <div class="report-collapsible-body">
+              <div class="diag-conclusion" style="margin:4px 0 0">
+                <strong>Diagnostic Impression &amp; Pathologist Conclusion:</strong> ${escapeHtml(diagReport.conclusion)}
+              </div>
             </div>
           </div>
         `;
@@ -2142,15 +2203,15 @@ async function viewPatient(patientId) {
         let reAdjudicateBtnHtml = "";
         if (portalMode === "insurance") {
           reAdjudicateBtnHtml = `
-            <button type="button" class="secondary" style="padding:4px 12px;font-size:0.75rem;margin-left:auto" onclick="openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled}, '${escapeHtml(statusBadge)}')">
+            <button type="button" class="secondary" style="padding:4px 12px;font-size:0.75rem;margin-left:auto" onclick="event.stopPropagation(); openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled}, '${escapeHtml(statusBadge)}')">
               🔄 Re-adjudicate Policy
             </button>
           `;
         }
 
         insuranceAdjudicationSectionHtml = `
-          <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(16,185,129,0.35);background:linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 100%)">
-            <div class="clinical-section-header" style="border-bottom:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;justify-content:space-between">
+          <div class="report-clinical-section report-collapsible-section" id="sectionInsurance" style="margin-top:14px;border:1px solid rgba(16,185,129,0.35);background:linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 100%)">
+            <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
               <div class="clinical-section-title-wrap">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -2162,8 +2223,13 @@ async function viewPatient(patientId) {
                   🛡️ ${escapeHtml(statusBadge)}
                 </span>
                 ${reAdjudicateBtnHtml}
+                <span class="report-collapsible-chevron" aria-hidden="true" style="color:#10b981">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
               </div>
             </div>
+
+            <div class="report-collapsible-body">
 
             <!-- Key Metrics Row: 3 Hero Badges -->
             <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));gap:14px;margin:16px 0">
@@ -2204,8 +2270,210 @@ async function viewPatient(patientId) {
                 <strong style="color:#86efac">Coverage Decision:</strong> ${escapeHtml(dispositionText)}
               </div>
             ` : ""}
+
+            <!-- Why Patient Needs to Pay / Policy Rejection Breakdown Section -->
+            ${(() => {
+              const processNotes = bundleClaimResponse?.processNote || [];
+              if (patientPayable === 0 && processNotes.length === 0) {
+                return `
+                  <div style="margin-top:14px;padding:12px 16px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:8px;display:flex;align-items:center;gap:12px">
+                    <span style="font-size:1.3rem;flex-shrink:0">✅</span>
+                    <div>
+                      <div style="font-size:0.85rem;font-weight:700;color:#34d399">100% Cashless Settlement Approved — Zero Patient Out-of-Pocket Expense</div>
+                      <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">All invoiced hospital charges are fully covered under policy terms with zero deductible and zero co-payment liability.</div>
+                    </div>
+                  </div>
+                `;
+              }
+
+              // Build rows for each non-covered item / rejection reason
+              let itemsToRender = [];
+              let totalRejectedCalculated = 0;
+
+              if (processNotes.length > 0) {
+                itemsToRender = processNotes.map(function(n) {
+                  const txt = n.text || "";
+                  const parts = txt.split(/\s*[\u2014]\s*|\s*--\s*/);
+                  const itemPart = (parts[0] || txt).trim();
+                  let policyReason = (parts[1] || "").trim();
+                  let patientReason = (parts[2] || "").trim();
+
+                  // If only 2 parts, check if patientReason is embedded in parts[1]
+                  if (!patientReason && policyReason) {
+                    const patMatch = policyReason.match(/(?:Patient Liability|Patient pays?|Patient Responsibility):\s*(.*)$/i);
+                    if (patMatch) {
+                      patientReason = patMatch[1].trim();
+                      policyReason = policyReason.replace(/(?:—|;)?\s*(?:Patient Liability|Patient pays?|Patient Responsibility):\s*.*$/i, "").trim();
+                    }
+                  }
+
+                  const amtM = itemPart.match(/(?:INR|₹)\s*([\d,]+\.?\d*)/i);
+                  const amt = amtM ? parseFloat(amtM[1].replace(/,/g, "")) : 0;
+                  totalRejectedCalculated += amt;
+
+                  let itemName = itemPart.replace(/:\s*(?:INR|₹)\s*[\d,]+\.?\d*/i, "").replace(/(?:INR|₹)\s*[\d,]+\.?\d*/i, "").replace(/:\s*$/, "").trim();
+                  if (!itemName) itemName = itemPart;
+
+                  // Infer category & badges
+                  const fullTextLower = (txt + " " + itemName).toLowerCase();
+                  let badge = "❌ Policy Exclusion";
+                  let badgeBg = "rgba(239,68,68,0.15)";
+                  let badgeColor = "#fca5a5";
+                  let badgeBorder = "rgba(239,68,68,0.35)";
+                  let accentColor = "#f87171";
+                  let icon = "💊";
+
+                  if (fullTextLower.includes("deductible")) {
+                    badge = "📋 Mandatory Deductible";
+                    badgeBg = "rgba(249,115,22,0.15)";
+                    badgeColor = "#fdba74";
+                    badgeBorder = "rgba(249,115,22,0.35)";
+                    accentColor = "#fb923c";
+                    icon = "📋";
+                    if (!patientReason) {
+                      patientReason = "Mandatory policy deductible threshold must be borne out-of-pocket by the patient before insurance benefits become payable.";
+                    }
+                  } else if (fullTextLower.includes("sub-limit") || fullTextLower.includes("sublimit") || fullTextLower.includes("room rent") || fullTextLower.includes("icu") || fullTextLower.includes("ward")) {
+                    badge = "⚠️ Daily Sub-Limit Capped";
+                    badgeBg = "rgba(245,158,11,0.15)";
+                    badgeColor = "#fcd34d";
+                    badgeBorder = "rgba(245,158,11,0.35)";
+                    accentColor = "#fbbf24";
+                    icon = "🏥";
+                    if (!patientReason) {
+                      patientReason = "Hospital room tariff exceeded the policy daily limit; excess room charges are excluded from insurance coverage and payable by the patient.";
+                    }
+                  } else if (fullTextLower.includes("co-pay") || fullTextLower.includes("copay") || fullTextLower.includes("sharing")) {
+                    badge = "🤝 Policy Co-Payment";
+                    badgeBg = "rgba(59,130,246,0.15)";
+                    badgeColor = "#93c5fd";
+                    badgeBorder = "rgba(59,130,246,0.35)";
+                    accentColor = "#60a5fa";
+                    icon = "🤝";
+                    if (!patientReason) {
+                      patientReason = "Contractual cost-sharing percentage payable by the beneficiary under the agreed policy schedule.";
+                    }
+                  } else if (fullTextLower.includes("sum insured") || fullTextLower.includes("exhaust")) {
+                    badge = "🛡️ Sum Insured Ceiling";
+                    badgeBg = "rgba(168,85,247,0.15)";
+                    badgeColor = "#d8b4fe";
+                    badgeBorder = "rgba(168,85,247,0.35)";
+                    accentColor = "#c084fc";
+                    icon = "🛡️";
+                    if (!patientReason) {
+                      patientReason = "Total medical charges exceed the annual policy coverage maximum; excess amount is the responsibility of the patient.";
+                    }
+                  } else {
+                    if (!patientReason) {
+                      patientReason = "Non-covered or excluded expense under policy terms must be paid out-of-pocket by the patient at hospital settlement.";
+                    }
+                  }
+
+                  if (!policyReason) {
+                    policyReason = "Excluded or deducted from claim coverage in accordance with the terms, conditions, and sub-limits of the insurance policy document.";
+                  }
+
+                  return {
+                    itemName: itemName,
+                    amt: amt,
+                    badge: badge,
+                    badgeBg: badgeBg,
+                    badgeColor: badgeColor,
+                    badgeBorder: badgeBorder,
+                    accentColor: accentColor,
+                    icon: icon,
+                    policyReason: policyReason,
+                    patientReason: patientReason,
+                  };
+                });
+              } else if (patientPayable > 0) {
+                // Synthesize from coverage calculation if processNotes not present
+                const copayPctVal = totalBilled > 0 ? Math.round((patientPayable / totalBilled) * 100) : (100 - coveragePct);
+                totalRejectedCalculated = patientPayable;
+                itemsToRender.push({
+                  itemName: "Policy Co-Payment & Beneficiary Cost-Sharing (" + copayPctVal + "% Liability)",
+                  amt: patientPayable,
+                  badge: "🤝 Policy Co-Payment Liability",
+                  badgeBg: "rgba(239,68,68,0.15)",
+                  badgeColor: "#fca5a5",
+                  badgeBorder: "rgba(239,68,68,0.35)",
+                  accentColor: "#f87171",
+                  icon: "🤝",
+                  policyReason: "The insurance policy document specifies a " + coveragePct + ":" + copayPctVal + " cost-sharing structure under " + (schemeName ? escapeHtml(schemeName) : "Health Insurance Policy") + ". Insurer coverage is capped at " + coveragePct + "% of admissible expenses (₹" + Number(insuredAmount).toLocaleString("en-IN", {minimumFractionDigits: 2}) + "); the remaining " + copayPctVal + "% is excluded from insurer liability.",
+                  patientReason: "Under the insurance policy contract, the beneficiary is responsible for paying " + copayPctVal + "% (₹" + Number(patientPayable).toLocaleString("en-IN", {minimumFractionDigits: 2}) + ") of total hospital expenses as mandatory out-of-pocket co-payment liability at discharge.",
+                });
+              }
+
+              if (itemsToRender.length === 0) return "";
+
+              const cardsHtml = itemsToRender.map(function(item) {
+                const amtFormatted = item.amt > 0 ? "₹" + Number(item.amt).toLocaleString("en-IN", {minimumFractionDigits: 2}) : "₹0.00";
+                return '<div style="background:rgba(15,23,42,0.45);border-radius:8px;border:1px solid var(--border);border-left:4px solid ' + item.accentColor + ';padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.1)">'
+                  + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+                  + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+                  + '<span style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:4px;background:' + item.badgeBg + ';color:' + item.badgeColor + ';border:1px solid ' + item.badgeBorder + ';text-transform:uppercase;letter-spacing:0.03em">'
+                  + escapeHtml(item.badge)
+                  + '</span>'
+                  + '<span style="font-size:0.88rem;font-weight:700;color:var(--text-primary)">'
+                  + escapeHtml(item.itemName)
+                  + '</span>'
+                  + '</div>'
+                  + '<div style="display:flex;align-items:baseline;gap:6px">'
+                  + '<span style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Patient Pays:</span>'
+                  + '<span style="font-size:0.95rem;font-weight:800;color:#f87171;font-family:var(--font-mono)">'
+                  + amtFormatted
+                  + '</span>'
+                  + '</div>'
+                  + '</div>'
+                  + '<div style="display:flex;flex-direction:column;gap:6px;font-size:0.78rem;line-height:1.45;background:rgba(0,0,0,0.22);padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.04)">'
+                  + '<div>'
+                  + '<span style="color:#fca5a5;font-weight:700">📜 Why Rejected from Insurance Policy:</span> '
+                  + '<span style="color:var(--text-secondary)">' + escapeHtml(item.policyReason) + '</span>'
+                  + '</div>'
+                  + '<div>'
+                  + '<span style="color:#fdba74;font-weight:700">📌 Why Patient Needs to Pay:</span> '
+                  + '<span style="color:var(--text-secondary)">' + escapeHtml(item.patientReason) + '</span>'
+                  + '</div>'
+                  + '</div>'
+                  + '</div>';
+              }).join("");
+
+              const displayTotal = totalRejectedCalculated > 0 ? totalRejectedCalculated : patientPayable;
+
+              return '<div style="margin-top:16px;border:1px solid rgba(239,68,68,0.35);border-radius:10px;background:rgba(239,68,68,0.03);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.12)">'
+                + '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg, rgba(239,68,68,0.12) 0%, rgba(245,158,11,0.08) 100%);border-bottom:1px solid rgba(239,68,68,0.25);flex-wrap:wrap;gap:8px">'
+                + '<div style="display:flex;align-items:center;gap:10px">'
+                + '<div style="width:28px;height:28px;border-radius:6px;background:rgba(239,68,68,0.2);display:flex;align-items:center;justify-content:center;color:#f87171">'
+                + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+                + '</div>'
+                + '<div>'
+                + '<h5 style="margin:0;font-size:0.88rem;font-weight:700;color:#fca5a5;letter-spacing:0.02em">Why Patient Needs to Pay — Policy Rejections &amp; Out-of-Pocket Breakdown</h5>'
+                + '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">Detailed explanation of why specific bills/items are rejected by the insurance policy document and payable by the patient</div>'
+                + '</div>'
+                + '</div>'
+                + '<div style="display:flex;align-items:center;gap:8px">'
+                + '<span style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Total Out-of-Pocket:</span>'
+                + '<span style="font-size:0.95rem;font-weight:800;color:#f87171;background:rgba(239,68,68,0.15);padding:3px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.3);font-family:var(--font-mono)">₹'
+                + Number(displayTotal).toLocaleString("en-IN", {minimumFractionDigits: 2})
+                + '</span>'
+                + '</div>'
+                + '</div>'
+                + '<div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">'
+                + cardsHtml
+                + '</div>'
+                + '<div style="padding:10px 16px;background:rgba(15,23,42,0.5);border-top:1px solid rgba(239,68,68,0.15);display:flex;align-items:center;justify-content:space-between;font-size:0.75rem;color:var(--text-muted);flex-wrap:wrap;gap:8px">'
+                + '<div style="display:flex;align-items:center;gap:6px">'
+                + '<span style="color:#10b981">✓</span>'
+                + '<span>Non-covered expenses verified against extracted insurance policy clauses and sub-limits</span>'
+                + '</div>'
+                + '</div>'
+                + '</div>'
+                + '</div>';
+            })()}
+            </div>
           </div>
         `;
+
       } else {
         // Not yet adjudicated!
         let totalBilled = 0;
@@ -2219,55 +2487,66 @@ async function viewPatient(patientId) {
 
         if (portalMode === "insurance") {
           insuranceAdjudicationSectionHtml = `
-            <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(99,102,241,0.4);background:linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(16,185,129,0.04) 100%)">
-              <div class="clinical-section-header" style="border-bottom:1px solid rgba(99,102,241,0.25)">
+            <div class="report-clinical-section report-collapsible-section" id="sectionInsurance" style="margin-top:14px;border:1px solid rgba(99,102,241,0.4);background:linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(16,185,129,0.04) 100%)">
+              <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
                 <div class="clinical-section-title-wrap">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                    <line x1="12" y1="18" x2="12" y2="12"></line>
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                   </svg>
-                  <h4 style="color:#a5b4fc;font-weight:700">Insurance Policy Adjudication Required</h4>
+                  <h4 style="color:#a5b4fc;font-weight:700">Insurance Coverage &amp; Patient Settlement Analysis</h4>
                 </div>
-                <span class="manifest-badge" style="background:rgba(99,102,241,0.18);color:#c7d2fe;border-color:rgba(99,102,241,0.4);font-weight:600">
-                  ⚡ TPA Action Required
-                </span>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="manifest-badge" style="background:rgba(99,102,241,0.18);color:#c7d2fe;border-color:rgba(99,102,241,0.4);font-weight:600">
+                    ⚡ TPA Action Required
+                  </span>
+                  <span class="report-collapsible-chevron" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </span>
+                </div>
               </div>
-              <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
-                <div style="max-width:560px">
-                  <p style="margin:0 0 6px 0;font-size:0.92rem;color:var(--text-primary)">
-                    Hospital has submitted verified clinical records and total bill of <strong style="color:#34d399">₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong>.
-                  </p>
-                  <p style="margin:0;font-size:0.8rem;color:var(--text-muted);line-height:1.4">
-                    Upload this patient's insurance policy document (PDF/Image) to auto-extract terms, sum insured, and compute approved coverage vs. patient co-payment liability.
-                  </p>
+              <div class="report-collapsible-body">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+                  <div style="max-width:560px">
+                    <p style="margin:0 0 6px 0;font-size:0.92rem;color:var(--text-primary)">
+                      Hospital has submitted verified clinical records and total bill of <strong style="color:#34d399">₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong>.
+                    </p>
+                    <p style="margin:0;font-size:0.8rem;color:var(--text-muted);line-height:1.4">
+                      Upload this patient's insurance policy document (PDF/Image) to auto-extract terms, sum insured, and compute approved coverage vs. patient co-payment liability.
+                    </p>
+                  </div>
+                  <button type="button" class="primary insurance-btn-glow" style="padding:10px 20px;font-size:0.88rem;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation(); openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled})">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <span>Upload Policy Document &amp; Adjudicate &rarr;</span>
+                  </button>
                 </div>
-                <button type="button" class="primary insurance-btn-glow" style="padding:10px 20px;font-size:0.88rem;display:flex;align-items:center;gap:8px" onclick="openPolicyUploadModal('${patient.id || patientId}', '${escapeHtml(pName)}', ${totalBilled})">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                  <span>Upload Policy Document &amp; Adjudicate &rarr;</span>
-                </button>
               </div>
             </div>
           `;
         } else {
           // Hospital mode
           insuranceAdjudicationSectionHtml = `
-            <div class="report-clinical-section" style="margin-top:16px;border:1px solid rgba(234,179,8,0.3);background:linear-gradient(135deg, rgba(234,179,8,0.06) 0%, rgba(15,23,42,0.4) 100%)">
-              <div class="clinical-section-header" style="border-bottom:1px solid rgba(234,179,8,0.2)">
+            <div class="report-clinical-section report-collapsible-section" id="sectionInsurance" style="margin-top:14px;border:1px solid rgba(234,179,8,0.3);background:linear-gradient(135deg, rgba(234,179,8,0.06) 0%, rgba(15,23,42,0.4) 100%)">
+              <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
                 <div class="clinical-section-title-wrap">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <polyline points="12 6 12 12 16 14"></polyline>
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                   </svg>
-                  <h4 style="color:#facc15;font-weight:700">Insurance Claim Adjudication Status</h4>
+                  <h4 style="color:#facc15;font-weight:700">Insurance Coverage &amp; Patient Settlement Analysis</h4>
                 </div>
-                <span class="manifest-badge" style="background:rgba(234,179,8,0.18);color:#fde047;border-color:rgba(234,179,8,0.4);font-weight:600">
-                  ⏳ Pending TPA Policy Review
-                </span>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="manifest-badge" style="background:rgba(234,179,8,0.18);color:#fde047;border-color:rgba(234,179,8,0.4);font-weight:600">
+                    ⏳ Pending TPA Policy Review
+                  </span>
+                  <span class="report-collapsible-chevron" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </span>
+                </div>
               </div>
-              <div style="padding:14px 18px;font-size:0.86rem;line-height:1.5;color:var(--text-secondary)">
-                <p style="margin:0 0 6px 0">Hospital billed charges of <strong>₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong> have been unified into ABDM FHIR format and published to the Insurance Authority (TPA).</p>
-                <div style="font-size:0.78rem;color:var(--text-muted)">The approved coverage, TPA benefit calculations, and patient liability will automatically appear here once adjudicated by the insurance authority.</div>
+              <div class="report-collapsible-body">
+                <div style="font-size:0.86rem;line-height:1.5;color:var(--text-secondary)">
+                  <p style="margin:0 0 6px 0">Hospital billed charges of <strong>₹${Number(totalBilled).toLocaleString("en-IN", {minimumFractionDigits: 2})}</strong> have been unified into ABDM FHIR format and published to the Insurance Authority (TPA).</p>
+                  <div style="font-size:0.78rem;color:var(--text-muted)">The approved coverage, TPA benefit calculations, and patient liability will automatically appear here once adjudicated by the insurance authority.</div>
+                </div>
               </div>
             </div>
           `;
@@ -2371,31 +2650,38 @@ async function viewPatient(patientId) {
         }).join("");
 
         billingSectionHtml = `
-          <div class="report-clinical-section" style="margin-top:16px">
-            <div class="clinical-section-header">
+          <div class="report-clinical-section report-collapsible-section" id="sectionBilling" style="margin-top:14px">
+            <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
               <div class="clinical-section-title-wrap">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
                 </svg>
                 <h4>Hospital Billing &amp; Financial Record</h4>
               </div>
-              <span class="manifest-badge" style="background:rgba(34,197,94,0.15);color:#86efac;border-color:rgba(34,197,94,0.3)">
-                ${bundleClaims.length} Bill${bundleClaims.length > 1 ? "s" : ""} &bull; FHIR Claim Records
-              </span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="manifest-badge" style="background:rgba(34,197,94,0.15);color:#86efac;border-color:rgba(34,197,94,0.3)">
+                  ${bundleClaims.length} Bill${bundleClaims.length > 1 ? "s" : ""} &bull; FHIR Claim Records
+                </span>
+                <span class="report-collapsible-chevron" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
+              </div>
             </div>
 
-            ${bundleClaims.length > 1 ? `
-              <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:10px 16px;margin-bottom:14px">
-                <div style="font-size:0.8rem;color:var(--text-secondary)">
-                  <strong>Consolidated Hospital Expenses:</strong> ${bundleClaims.length} Bills Processed
+            <div class="report-collapsible-body">
+              ${bundleClaims.length > 1 ? `
+                <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:10px 16px;margin-bottom:14px">
+                  <div style="font-size:0.8rem;color:var(--text-secondary)">
+                    <strong>Consolidated Hospital Expenses:</strong> ${bundleClaims.length} Bills Processed
+                  </div>
+                  <div style="font-size:1.1rem;font-weight:800;color:#818cf8">
+                    Total Billed: ₹${Number(totalCumulativeBilled).toLocaleString("en-IN")}
+                  </div>
                 </div>
-                <div style="font-size:1.1rem;font-weight:800;color:#818cf8">
-                  Total Billed: ₹${Number(totalCumulativeBilled).toLocaleString("en-IN")}
-                </div>
-              </div>
-            ` : ""}
+              ` : ""}
 
-            ${billsContentHtml}
+              ${billsContentHtml}
+            </div>
           </div>
         `;
       }
@@ -2574,6 +2860,23 @@ async function viewPatient(patientId) {
             <span><strong>Compliance:</strong> 100% ABDM Compliant</span>
           </div>
 
+          <!-- Interactive Dropdown Toolbar (Expand / Collapse All) -->
+          <div class="report-section-controls" style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px 0;padding:2px 0">
+            <span style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)">
+              Clinical &amp; Financial Dossier Sections
+            </span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="section-toggle-all-btn" onclick="toggleAllReportSections(true)" title="Expand all sections" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);font-size:0.72rem;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:all 0.15s ease">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                <span>Expand All</span>
+              </button>
+              <button type="button" class="section-toggle-all-btn" onclick="toggleAllReportSections(false)" title="Collapse all sections" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);font-size:0.72rem;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:all 0.15s ease">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+                <span>Collapse All</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Clinical Diagnoses & Treatment Section -->
           ${clinicalSectionHtml}
 
@@ -2583,44 +2886,64 @@ async function viewPatient(patientId) {
           <!-- Insurance Coverage & Patient Payment Settlement Section (Separate Section) -->
           ${insuranceAdjudicationSectionHtml}
 
-          <!-- Observations Section Header & Filter Toolbar -->
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <h4 style="margin:0;font-size:0.86rem;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.05em">
-              Laboratory &amp; Diagnostic Investigations (${bundleObs.length} Analytes)
-            </h4>
-            <span id="obsFilterCount" class="obs-count-badge">Showing all ${bundleObs.length} investigations</span>
-          </div>
-
-          <div class="obs-toolbar">
-            <div class="obs-search-wrap">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <input type="text" id="obsSearchInput" class="obs-search-input" placeholder="Filter tests e.g. Platelet, Hemoglobin, Creatinine..." />
+          <!-- Laboratory & Diagnostic Investigations Dropdown Section -->
+          <div class="report-clinical-section report-collapsible-section" id="sectionObservations" style="margin-top:14px">
+            <div class="clinical-section-header report-collapsible-header" onclick="toggleReportSection(this)" onkeydown="handleReportSectionKeydown(event, this)" tabindex="0" role="button" aria-expanded="false">
+              <div class="clinical-section-title-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/>
+                  <path d="M8.5 2h7"/>
+                  <path d="M7 16h10"/>
+                </svg>
+                <h4 style="color:#c7d2fe">Laboratory &amp; Diagnostic Investigations</h4>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="manifest-badge" style="background:rgba(99,102,241,0.15);color:#a5b4fc;border-color:rgba(99,102,241,0.3)">
+                  ${bundleObs.length} Analytes ${abnormalCount > 0 ? `&bull; <span style="color:#f87171">${abnormalCount} Abnormal</span>` : ""}
+                </span>
+                <span class="report-collapsible-chevron" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </span>
+              </div>
             </div>
-            <div class="obs-filter-group">
-              <button type="button" class="obs-filter-btn active" data-filter="all">All (${bundleObs.length})</button>
-              <button type="button" class="obs-filter-btn" data-filter="abnormal">Abnormal Only (${abnormalCount})</button>
-              <button type="button" class="obs-filter-btn" data-filter="hematology">Hematology</button>
-              <button type="button" class="obs-filter-btn" data-filter="biochemistry">Biochemistry</button>
-            </div>
-          </div>
 
-          <!-- Clinical Observations Table -->
-          <div class="table-wrap" style="margin-bottom:20px">
-            <table class="report-table" id="reportObservationsTable">
-              <thead>
-                <tr>
-                  <th>Test / Analyte Investigation</th>
-                  <th>LOINC Code</th>
-                  <th>Observed Result</th>
-                  <th>Unit</th>
-                  <th>Biological Reference Range</th>
-                  <th>Flag</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${obsRowsHtml}
-              </tbody>
-            </table>
+            <div class="report-collapsible-body" style="padding-top:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <span id="obsFilterCount" class="obs-count-badge">Showing all ${bundleObs.length} investigations</span>
+              </div>
+
+              <div class="obs-toolbar">
+                <div class="obs-search-wrap">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  <input type="text" id="obsSearchInput" class="obs-search-input" placeholder="Filter tests e.g. Platelet, Hemoglobin, Creatinine..." />
+                </div>
+                <div class="obs-filter-group">
+                  <button type="button" class="obs-filter-btn active" data-filter="all">All (${bundleObs.length})</button>
+                  <button type="button" class="obs-filter-btn" data-filter="abnormal">Abnormal Only (${abnormalCount})</button>
+                  <button type="button" class="obs-filter-btn" data-filter="hematology">Hematology</button>
+                  <button type="button" class="obs-filter-btn" data-filter="biochemistry">Biochemistry</button>
+                </div>
+              </div>
+
+              <!-- Clinical Observations Table -->
+              <div class="table-wrap" style="margin-bottom:8px">
+                <table class="report-table" id="reportObservationsTable">
+                  <thead>
+                    <tr>
+                      <th>Test / Analyte Investigation</th>
+                      <th>LOINC Code</th>
+                      <th>Observed Result</th>
+                      <th>Unit</th>
+                      <th>Biological Reference Range</th>
+                      <th>Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${obsRowsHtml}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
 

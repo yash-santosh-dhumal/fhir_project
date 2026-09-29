@@ -120,19 +120,52 @@ a:hover { text-decoration:underline; }
   border:1px solid rgba(245,158,11,0.2);
 }
 
-/* ═════════ Tab Navigation ═════════ */
+/* ═════════ Tab Navigation (Underline-Only for Selected Tab) ═════════ */
 .tab-nav {
-  display:flex; gap:4px; padding:4px; background:var(--bg-secondary);
-  border-radius:var(--radius); margin-bottom:24px; border:1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+  background: transparent;
+  border-radius: 0;
+  margin-bottom: 24px;
+  border: none;
+  border-bottom: 1.5px solid var(--border);
 }
 .tab-btn {
-  flex:1; padding:10px 20px; background:transparent; border:none; border-radius:var(--radius-sm);
-  color:var(--text-secondary); font-size:.85rem; font-weight:600; cursor:pointer;
-  transition:all .2s ease; font-family:var(--font-sans);
+  position: relative;
+  flex: 0 0 auto;
+  padding: 12px 22px 14px;
+  background: transparent !important;
+  border: none;
+  border-radius: 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+  font-family: var(--font-sans);
+  box-shadow: none !important;
 }
-.tab-btn:hover { color:var(--text-primary); background:var(--bg-card); }
+.tab-btn:hover {
+  color: var(--text-primary);
+  background: transparent !important;
+}
 .tab-btn.active {
-  background:var(--accent); color:#fff; box-shadow:0 2px 12px var(--accent-glow);
+  background: transparent !important;
+  color: #60a5fa !important;
+  font-weight: 700;
+  box-shadow: none !important;
+}
+.tab-btn.active::after {
+  content: "";
+  position: absolute;
+  bottom: -1.5px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 -1px 8px rgba(59, 130, 246, 0.5);
 }
 .tab-panel { display:none; }
 .tab-panel.active { display:block; animation:fadeIn .3s ease; }
@@ -176,7 +209,93 @@ a:hover { text-decoration:underline; }
 .upload-section { margin-bottom: 20px; }
 .upload-card { text-align:center; padding:32px; }
 .upload-card.drag-over { border-color:var(--accent); background:var(--accent-glow); }
-.upload-btn-group { display:flex; gap:12px; justify-content:center; align-items:center; margin-top:12px; }
+.upload-btn-group { display:flex; gap:16px; justify-content:center; align-items:center; margin-top:16px; flex-wrap:wrap; }
+
+/* ── Browse File Button ── */
+.browse-file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 22px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+}
+.browse-file-btn:hover {
+  background: var(--bg-input);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+}
+
+/* ── Prominent Hero Convert to FHIR Button ── */
+#convertButton,
+.convert-fhir-btn-hero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 13px 32px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+  border: none;
+}
+
+/* When Enabled / Ready to convert */
+#convertButton:not(:disabled),
+.convert-fhir-btn-hero:not(:disabled) {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff !important;
+  box-shadow: 0 4px 22px rgba(16, 185, 129, 0.5), 0 0 0 1px rgba(16, 185, 129, 0.6);
+  transform: translateY(-1px);
+  animation: convertReadyGlow 2.4s infinite ease-in-out;
+}
+
+#convertButton:not(:disabled):hover,
+.convert-fhir-btn-hero:not(:disabled):hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 6px 30px rgba(16, 185, 129, 0.65), 0 0 0 1.5px #34d399;
+  transform: translateY(-2px);
+}
+
+#convertButton:not(:disabled):active,
+.convert-fhir-btn-hero:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: 0 2px 12px rgba(16, 185, 129, 0.4);
+}
+
+/* When Disabled (Waiting for file) */
+#convertButton:disabled,
+.convert-fhir-btn-hero:disabled {
+  background: rgba(16, 185, 129, 0.12);
+  color: rgba(52, 211, 153, 0.8);
+  border: 1.5px dashed rgba(16, 185, 129, 0.4);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+@keyframes convertReadyGlow {
+  0%, 100% {
+    box-shadow: 0 4px 22px rgba(16, 185, 129, 0.5), 0 0 0 1px rgba(16, 185, 129, 0.6);
+  }
+  50% {
+    box-shadow: 0 6px 30px rgba(16, 185, 129, 0.75), 0 0 0 2.5px rgba(52, 211, 153, 0.85);
+  }
+}
 .file-info { margin:14px 0 0; font-size:.85rem; color:var(--text-secondary); }
 
 /* ── Horizontal Stepper Card with Connected Line ── */
@@ -1068,6 +1187,95 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   padding-bottom: 10px;
 }
+
+/* ── Dropdown / Collapsible Report Sections ── */
+.report-clinical-section.report-collapsible-section {
+  padding: 0 !important;
+  margin-bottom: 14px !important;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.report-clinical-section.report-collapsible-section:hover {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.report-clinical-section.report-collapsible-section .clinical-section-header.report-collapsible-header {
+  margin-bottom: 0 !important;
+  border-bottom: none !important;
+  padding: 14px 20px !important;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  transition: background 0.18s ease;
+}
+
+.report-clinical-section.report-collapsible-section .clinical-section-header.report-collapsible-header:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.report-clinical-section.report-collapsible-section .clinical-section-header.report-collapsible-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.report-collapsible-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.report-collapsible-header:hover .report-collapsible-chevron {
+  background: rgba(99, 102, 241, 0.16);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.report-collapsible-section.open .report-collapsible-chevron {
+  transform: rotate(180deg);
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+}
+
+.report-collapsible-section.open .clinical-section-header.report-collapsible-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.report-collapsible-body {
+  display: none;
+  padding: 18px 20px;
+}
+
+.report-collapsible-section.open .report-collapsible-body {
+  display: block;
+  animation: sectionDropdownSlide 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes sectionDropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.section-toggle-all-btn:hover {
+  background: rgba(99, 102, 241, 0.15) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: #c7d2fe !important;
+}
 .clinical-section-title-wrap {
   display: flex;
   align-items: center;
@@ -1532,7 +1740,8 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
   #reportBundleSelect, #toggleReportJsonBtn, #copyReportJsonBtn, #reportRawJsonWrap,
   .obs-toolbar, .pc-delete-btn, #downloadReportJsonBtn, #deleteCurrentReportBtn,
   #closePatientDetailBtn, .iop-bundle-selector, .obs-count-badge,
-  .modal-backdrop, .pipeline-log-box {
+  .modal-backdrop, .pipeline-log-box,
+  .report-section-controls, .report-collapsible-chevron {
     display: none !important;
   }
 
@@ -1698,6 +1907,22 @@ code { font-family:var(--font-mono); font-size:.78rem; line-height:1.5; }
     margin-bottom: 14px !important;
     padding: 12px 16px !important;
     page-break-inside: avoid;
+  }
+
+  .report-clinical-section.report-collapsible-section {
+    padding: 12px 16px !important;
+  }
+  .report-collapsible-body {
+    display: block !important;
+    padding: 10px 0 0 0 !important;
+    animation: none !important;
+  }
+  .clinical-section-header.report-collapsible-header {
+    cursor: default !important;
+    pointer-events: none !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 0 0 8px 0 !important;
+    margin-bottom: 10px !important;
   }
 
   .report-clinical-section div[style*="background"] {
@@ -3875,5 +4100,17 @@ body.portal-insurance .portal-indicator-dot {
   padding: 10px 14px;
   border-radius: 8px;
 }
+
+/* ═════════ Insurance Portal: Hide Tab Navigation & Upload Panel ═════════ */
+body.portal-insurance .tab-nav,
+body.portal-insurance #tabNav,
+body.portal-insurance #tab-upload {
+  display: none !important;
+}
+
+body.portal-insurance #tab-patients {
+  display: block !important;
+}
+
 
 

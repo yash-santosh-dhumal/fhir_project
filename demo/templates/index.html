@@ -172,8 +172,20 @@
               <p class="muted" id="uploadCardDesc">Upload a laboratory report (PDF/image) or a <strong>ZIP archive containing all patient documents across nested folders</strong>. All data will be extracted and consolidated into a unified FHIR record.</p>
               <input id="fileInput" type="file" accept=".pdf,image/jpeg,image/png,image/webp,image/bmp,image/tiff,.zip,application/zip,application/x-zip-compressed" hidden>
               <div class="upload-btn-group">
-                <button id="browseButton" class="primary" type="button">Browse File</button>
-                <button id="convertButton" class="secondary" type="button" disabled>Convert to FHIR</button>
+                <button id="browseButton" class="browse-file-btn" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                  <span>Browse Document / Archive</span>
+                </button>
+                <button id="convertButton" class="convert-fhir-btn-hero" type="button" disabled>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                  </svg>
+                  <span>Convert to FHIR &rarr;</span>
+                </button>
               </div>
               <div id="fileInfo" class="file-info">No file selected</div>
             </article>

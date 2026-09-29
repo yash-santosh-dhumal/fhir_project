@@ -462,14 +462,19 @@ class TestFhirUnifier(unittest.TestCase):
 
         adj = _adjudicate_bill_against_policy([bill], policy)
         self.assertEqual(adj["total_billed"], 77832.0)
-        # Excluded capecitabine items: 23594 + 15088 = 38682
+        # Drug exclusion: Only pharmacy/medication items are excluded for drug exclusions.
+        # Capecitabine + Irinotecan (course) in Pharmacy/Medications: 15088 (excluded)
+        # Chemotherapy procedure charge in Surgical/Procedures: 23594 (NOT excluded — procedure/admin fee)
         # Room excess: (820 - 500) + (3312 - 2000) = 320 + 1312 = 1632
         # Deductible: 5000
-        # Insured = 77832 - 38682 - 1632 - 5000 = 32518.0 (41.8%)
-        self.assertEqual(adj["insured_amount"], 32518.0)
-        self.assertEqual(adj["patient_payable"], 45314.0)
-        self.assertEqual(adj["coverage_percentage"], 41.8)
-        self.assertEqual(adj["status"], "Partially Covered (41.8%)")
+        # Insured = 77832 - 15088 - 1632 - 5000 = 56112.0 (72.1%)
+        self.assertEqual(adj["insured_amount"], 56112.0)
+        self.assertEqual(adj["patient_payable"], 21720.0)
+        self.assertEqual(adj["coverage_percentage"], 72.1)
+        self.assertEqual(adj["status"], "Partially Covered (72.1%)")
+        # Verify rejection_reasons are present and accurate
+        reasons = adj.get("rejection_reasons", [])
+        self.assertTrue(len(reasons) >= 3)  # exclusion + room sublimit(s) + deductible
 
 
 if __name__ == "__main__":
