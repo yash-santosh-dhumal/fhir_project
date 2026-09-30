@@ -26,11 +26,11 @@ fi
 
 # Worker tuning for Render 512 MB Free Tier:
 # - Gemini API calls are pure network I/O (not CPU/RAM bound), so high parallelism is safe.
-# - Images are already compressed to ≤1200px / 250KB before sending, keeping RAM footprint low.
-# - GEMINI_OCR_MAX_WORKERS=6 processes ~9 batches in ~2 rounds instead of ~7 rounds (was: 2).
-# - GEMINI_OCR_BATCH_SIZE=5 matches local behavior.
+# - Images are already compressed to ≤1400px / 300KB before sending, keeping RAM footprint low.
+# - GEMINI_OCR_BATCH_SIZE=5: smaller batches → shorter per-call latency → better parallel throughput.
+# - GEMINI_OCR_MAX_WORKERS=8: run up to 8 batches simultaneously (40 docs in one parallel round).
 # - TOOLKIT_CONCURRENT_WORKERS=2 is safe since each call passes small compressed bytes.
-export GEMINI_OCR_MAX_WORKERS="${GEMINI_OCR_MAX_WORKERS:-6}"
+export GEMINI_OCR_MAX_WORKERS="${GEMINI_OCR_MAX_WORKERS:-8}"
 export GEMINI_OCR_BATCH_SIZE="${GEMINI_OCR_BATCH_SIZE:-5}"
 export TOOLKIT_CONCURRENT_WORKERS="${TOOLKIT_CONCURRENT_WORKERS:-2}"
 

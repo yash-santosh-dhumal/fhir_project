@@ -63,6 +63,9 @@ except ImportError:
 TOOLKIT_URL = os.environ.get("TOOLKIT_URL", "http://localhost:8088").rstrip("/")
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TOOLKIT_TIMEOUT_SECONDS", "180"))
 TOOLKIT_CONCURRENT_WORKERS = int(os.environ.get("TOOLKIT_CONCURRENT_WORKERS", "4"))
+# Honour GEMINI_OCR_BATCH_SIZE from start.sh (default 5 for Render free tier)
+# Smaller batches = shorter per-call latency, maximising parallelism across workers
+_OCR_BATCH_SIZE = int(os.environ.get("GEMINI_OCR_BATCH_SIZE", "5"))
 SUPPORTED_MIME_TYPES = {
     "application/pdf",
     "image/jpeg",
@@ -270,7 +273,7 @@ def _do_convert(store: FhirStore, skip_insurance: bool = True):
       gemini_future = pipeline_executor.submit(
           process_archive_documents_with_gemini,
           analysis.documents,
-          10,
+          _OCR_BATCH_SIZE,   # reads GEMINI_OCR_BATCH_SIZE env var (default 5)
           skip_insurance,
       )
       toolkit_future = pipeline_executor.submit(_run_toolkit_for_docs, candidate_lab_docs)
