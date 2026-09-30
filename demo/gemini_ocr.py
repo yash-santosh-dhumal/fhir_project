@@ -34,8 +34,8 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 GEMINI_MODEL = os.environ.get("GEMINI_OCR_MODEL", "gemini-3.5-flash-lite")
-MAX_BATCH_SIZE = int(os.environ.get("GEMINI_OCR_BATCH_SIZE", "5"))
-MAX_WORKERS = int(os.environ.get("GEMINI_OCR_MAX_WORKERS", "8"))
+MAX_BATCH_SIZE = int(os.environ.get("GEMINI_OCR_BATCH_SIZE", "10"))
+MAX_WORKERS = int(os.environ.get("GEMINI_OCR_MAX_WORKERS", "4"))
 MAX_RETRIES = int(os.environ.get("GEMINI_OCR_MAX_RETRIES", "3"))
 
 
@@ -187,14 +187,15 @@ def _prepare_document_part(file_bytes: bytes, mime_type: str, filename: str) -> 
             with PIL.Image.open(io.BytesIO(file_bytes)) as img:
                 w, h = img.size
                 max_dim = max(w, h)
-                if max_dim > 1200 or len(file_bytes) > 250 * 1024 or img.format != "JPEG":
-                    if max_dim > 1200:
-                        scale = 1200.0 / max_dim
-                        img = img.resize((int(w * scale), int(h * scale)), PIL.Image.Resampling.LANCZOS)
+<<<<<<< HEAD
+                if max_dim > 1400 or len(file_bytes) > 300 * 1024 or img.format != "JPEG":
+                    if max_dim > 1400:
+                        scale = 1400.0 / max_dim
+                        img = img.resize((int(w * scale), int(h * scale)), PIL.Image.Resampling.BILINEAR)
                     if img.mode != "RGB":
                         img = img.convert("RGB")
                     buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=75, optimize=True)
+                    img.save(buf, format="JPEG", quality=82, optimize=True)
                     file_bytes = buf.getvalue()
                     mime_type = "image/jpeg"
                 return types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
@@ -387,7 +388,14 @@ OUTPUT REQUIREMENT: Return ONLY a valid JSON object matching this schema:
             last_err = exc
             log.warning("Batch %d attempt %d failed: %s", batch_index, attempt + 1, exc)
             if attempt < MAX_RETRIES - 1:
-                sleep_time = (attempt + 1) * 2.0
+                err_str = str(exc)
+                retry_match = re.search(r"retry in ([\d\.]+)s", err_str, re.IGNORECASE)
+                if retry_match:
+                    sleep_time = min(35.0, float(retry_match.group(1)) + 0.5)
+                elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    sleep_time = min(30.0, 5.0 * (attempt + 1))
+                else:
+                    sleep_time = (attempt + 1) * 2.0
                 time.sleep(sleep_time)
 
     log.error("Batch %d failed completely after %d attempts: %s", batch_index, MAX_RETRIES, last_err)
@@ -673,10 +681,27 @@ def process_archive_documents_with_gemini(
     log.info("Processing %d clinical text documents with Gemini vision (skipping %d non-text visual evidence photos)...",
              len(text_docs), len(visual_docs))
 
+    # Deduplicate clinical text documents with identical file content bytes
+    import hashlib
+    content_hash_map: dict[str, Any] = {}
+    dup_to_canonical: dict[str, str] = {}
+    unique_text_docs: list[Any] = []
+    for d in text_docs:
+        h = hashlib.sha256(d.file_bytes).hexdigest()
+        if h in content_hash_map:
+            dup_to_canonical[d.relative_path] = content_hash_map[h].relative_path
+        else:
+            content_hash_map[h] = d
+            unique_text_docs.append(d)
+
+    if dup_to_canonical:
+        log.info("Deduplicated %d identical document(s) in archive (%d unique clinical documents to process)",
+                 len(dup_to_canonical), len(unique_text_docs))
+
     # Separate priority financial documents (bill and insurance claim) to guarantee fast & exact extraction
     priority_financial_docs: list[Any] = []
     regular_clinical_docs: list[Any] = []
-    for d in text_docs:
+    for d in unique_text_docs:
         rel_lower = d.relative_path.lower()
         is_bill = "demo bill" in rel_lower or "hospital_bill" in rel_lower
         is_policy = not skip_insurance and ("demo claims" in rel_lower or "insurance_policy" in rel_lower)
@@ -703,8 +728,8 @@ def process_archive_documents_with_gemini(
     for i in range(0, len(reg_tuples), batch_size):
         batches.append(reg_tuples[i : i + batch_size])
 
-    log.info("Divided %d clinical text documents into %d parallel batches (max_workers=%d)",
-             len(text_docs), len(batches), min(MAX_WORKERS, len(batches)))
+    log.info("Divided %d unique clinical documents into %d parallel batches (max_workers=%d)",
+             len(unique_text_docs), len(batches), min(MAX_WORKERS, len(batches)))
 
     results: list[dict[str, Any]] = [None] * len(batches)  # type: ignore
 
@@ -729,23 +754,34 @@ def process_archive_documents_with_gemini(
                 results[idx] = {}
 
     elapsed = round(time.perf_counter() - start_time, 2)
-    log.info("Gemini high-level OCR on %d documents finished in %.2fs", len(text_docs), elapsed)
+    log.info("Gemini high-level OCR on %d unique documents finished in %.2fs", len(unique_text_docs), elapsed)
 
     merged = _merge_batch_results(
         [r for r in results if r],
-        [d.relative_path for d in text_docs],
+        [d.relative_path for d in unique_text_docs],
     )
 
     if skip_insurance:
         merged.insurance_policy = None
 
     # Reconstruct merged.documents in the original order of all archive documents,
-    # ensuring visual evidence photos are clearly classified without omission.
+    # ensuring visual evidence photos are clearly classified without omission,
+    # and duplicates are seamlessly populated from the canonical document.
     doc_map = {d.relative_path: d for d in merged.documents}
     ordered_docs: list[ExtractedDocumentInfo] = []
     for d in documents:
         if d.relative_path in doc_map:
             ordered_docs.append(doc_map[d.relative_path])
+        elif d.relative_path in dup_to_canonical and dup_to_canonical[d.relative_path] in doc_map:
+            canon = doc_map[dup_to_canonical[d.relative_path]]
+            cloned = ExtractedDocumentInfo(
+                filename=d.filename,
+                relative_path=d.relative_path,
+                document_type=canon.document_type,
+                summary=canon.summary,
+                clinical_notes=list(canon.clinical_notes),
+            )
+            ordered_docs.append(cloned)
         else:
             fn_lower = d.filename.lower()
             fp_lower = d.relative_path.lower()

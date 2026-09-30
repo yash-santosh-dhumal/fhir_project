@@ -171,23 +171,43 @@ def _do_convert(store: FhirStore, skip_insurance: bool = True):
 
     start = time.perf_counter()
 
-    # 1. Identify candidate lab reports using comprehensive clinical keywords
-    lab_keywords = {
-        "lab", "pathology", "blood", "biochemistry", "cbc", "cbp", "serum",
-        "test", "urine", "diagnostic", "culture", "profile", "lipid", "lft",
-        "rft", "kft", "dtrs", "bone", "marrow", "hpe", "biopsy", "colonoscopy",
-        "investigation", "report",
-    }
-    candidate_lab_docs = [
-        doc for doc in analysis.documents
-        if getattr(doc, "is_clinical_text_document", True)
-        and (
-            any(k in doc.filename.lower() for k in lab_keywords)
-            or any(k in doc.folder_path.lower() for k in lab_keywords)
-        )
-    ]
+    # 1. Identify candidate lab reports using precise clinical vocabulary while excluding administrative forms
+    non_lab_folders = (
+        "consent", "counseling", "dischargesummary", "bills", "bill",
+        "case sheet", "jeevandaan", "preauthorisation", "preauth",
+        "satisfactory", "transportation", "dtrs", "tumor board",
+        "treatment plan", "operation", "icu", "ward",
+    )
+    lab_keywords = (
+        "cbc", "cbp", "blood", "pathology", "biochemistry", "serum",
+        "lipid", "lft", "rft", "kft", "bone marrow", "bone    marrow",
+        "biopsy", "hpe", "colonoscopy", "culture", "urine", "stool",
+        "hematology", "haematology", "lab_report", "lab report",
+    )
+    candidate_lab_docs = []
+    for doc in analysis.documents:
+      if not getattr(doc, "is_clinical_text_document", True):
+        continue
+      fl = doc.folder_path.lower()
+      fn = doc.filename.lower()
+      if any(f in fl for f in non_lab_folders):
+        continue
+      if any(k in fn for k in lab_keywords) or "investigation" in fl:
+        candidate_lab_docs.append(doc)
 
-    def _call_toolkit_api(doc_bytes: bytes, doc_mime: str, retry: int = 0) -> dict:
+    # Prioritize primary quantitative laboratory reports (CBC, CBP, Serum, etc.) and limit to top 2 for toolkit API
+    def _lab_priority_score(d: Any) -> int:
+      fn = d.filename.lower()
+      if any(k in fn for k in ("cbp", "cbc", "complete blood")): return 0
+      if any(k in fn for k in ("serum", "biochemistry", "lft", "rft", "kft")): return 1
+      if any(k in fn for k in ("bone marrow", "bone    marrow", "biopsy", "hpe")): return 2
+      if any(k in fn for k in ("blood group", "blood")): return 3
+      return 4
+
+    candidate_lab_docs.sort(key=_lab_priority_score)
+    candidate_lab_docs = candidate_lab_docs[:2]
+
+    def _call_toolkit_api(doc_bytes: bytes, doc_mime: str) -> dict:
       resp = requests.post(
           f"{TOOLKIT_URL}/document_to_fhir",
           data=doc_bytes,
@@ -196,12 +216,7 @@ def _do_convert(store: FhirStore, skip_insurance: bool = True):
       )
       if not resp.ok:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-      pl = resp.json()
-      std_docs = pl.get("standardized_medical_documents") or []
-      if not std_docs and retry < 1:
-        time.sleep(1.5)
-        return _call_toolkit_api(doc_bytes, doc_mime, retry + 1)
-      return pl
+      return resp.json()
 
     def _run_toolkit_for_docs(docs: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
       bundles_out: list[dict[str, Any]] = []
@@ -255,7 +270,7 @@ def _do_convert(store: FhirStore, skip_insurance: bool = True):
       gemini_future = pipeline_executor.submit(
           process_archive_documents_with_gemini,
           analysis.documents,
-          5,
+          10,
           skip_insurance,
       )
       toolkit_future = pipeline_executor.submit(_run_toolkit_for_docs, candidate_lab_docs)
@@ -263,15 +278,17 @@ def _do_convert(store: FhirStore, skip_insurance: bool = True):
       gemini_extraction = gemini_future.result()
       extracted_bundles, source_names = toolkit_future.result()
 
-    # Safety check: if Gemini OCR identified any additional lab document that wasn't in candidate_lab_docs,
-    # process only those missed documents with toolkit API.
+    # Safety check: if Gemini OCR identified an actual laboratory test document that wasn't in candidate_lab_docs,
+    # process only those specific lab test documents with toolkit API.
     already_processed_paths = {d.relative_path for d in candidate_lab_docs}
     additional_candidates = []
+    specific_lab_types = ("laboratory", "pathology", "biochemistry", "complete blood", "cbc", "cbp", "blood test", "bone marrow", "biopsy")
     for doc in analysis.documents:
       if doc.relative_path not in already_processed_paths and gemini_extraction.documents:
         for edoc in gemini_extraction.documents:
           if (edoc.filename == doc.filename or edoc.relative_path == doc.relative_path):
-            if any(k in edoc.document_type.lower() for k in lab_keywords):
+            dt_lower = edoc.document_type.lower()
+            if any(k in dt_lower for k in specific_lab_types) and not any(f in dt_lower for f in ("discharge", "sheet", "summary", "consent")):
               additional_candidates.append(doc)
               break
 
