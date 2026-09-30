@@ -187,7 +187,6 @@ def _prepare_document_part(file_bytes: bytes, mime_type: str, filename: str) -> 
             with PIL.Image.open(io.BytesIO(file_bytes)) as img:
                 w, h = img.size
                 max_dim = max(w, h)
-<<<<<<< HEAD
                 if max_dim > 1400 or len(file_bytes) > 300 * 1024 or img.format != "JPEG":
                     if max_dim > 1400:
                         scale = 1400.0 / max_dim
